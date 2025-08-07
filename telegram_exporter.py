@@ -36,6 +36,7 @@ import requests
 from exporters import (
     MessageData, JSONExporter, HTMLExporter, MarkdownExporter, MediaDownloader
 )
+from config_manager import ConfigManager
 
 
 @dataclass
@@ -66,9 +67,10 @@ class TelegramExporter:
         self.channels: List[ChannelInfo] = []
         self.channels_file = Path('.channels')
         self.stats = ExportStats()
-        self.bot_token: Optional[str] = None
-        self.chat_id: Optional[str] = None
         self.running = True
+        
+        # Инициализация менеджера конфигурации
+        self.config_manager = ConfigManager()
         
         # Настройка логирования
         self.setup_logging()
@@ -88,12 +90,11 @@ class TelegramExporter:
     async def initialize_client(self):
         """Инициализация Telegram клиента"""
         try:
-            api_id = Prompt.ask("Введите API ID", password=False)
-            api_hash = Prompt.ask("Введите API Hash", password=True)
-            phone = Prompt.ask("Введите номер телефона")
+            # Получение конфигурации из менеджера
+            telegram_config = self.config_manager.get_telegram_config()
             
-            self.client = TelegramClient('session_name', api_id, api_hash)
-            await self.client.start(phone)
+            self.client = TelegramClient('session_name', telegram_config.api_id, telegram_config.api_hash)
+            await self.client.start(telegram_config.phone)
             
             if await self.client.is_user_authorized():
                 self.console.print("[green]✓ Успешная авторизация в Telegram[/green]")
@@ -109,31 +110,21 @@ class TelegramExporter:
             return False
     
     def setup_bot_notifications(self):
-        """Настройка уведомлений через бота"""
-        if Confirm.ask("Настроить уведомления через Telegram бота?"):
-            self.bot_token = Prompt.ask("Введите токен бота")
-            self.chat_id = Prompt.ask("Введите Chat ID для уведомлений")
-            
-            # Проверка работы бота
-            try:
-                url = f"https://api.telegram.org/bot{self.bot_token}/getMe"
-                response = requests.get(url)
-                if response.status_code == 200:
-                    self.console.print("[green]✓ Бот настроен успешно[/green]")
-                else:
-                    self.console.print("[yellow]⚠ Не удалось проверить бота[/yellow]")
-            except Exception as e:
-                self.console.print(f"[yellow]⚠ Ошибка проверки бота: {e}[/yellow]")
+        """Настройка уведомлений через бота (теперь через конфигурацию)"""
+        # Этот метод больше не нужен, так как настройка происходит через ConfigManager
+        pass
     
     async def send_notification(self, message: str):
         """Отправка уведомления через бота"""
-        if not self.bot_token or not self.chat_id:
+        bot_config = self.config_manager.get_bot_config()
+        
+        if not bot_config.enabled or not bot_config.bot_token or not bot_config.chat_id:
             return
             
         try:
-            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+            url = f"https://api.telegram.org/bot{bot_config.bot_token}/sendMessage"
             data = {
-                'chat_id': self.chat_id,
+                'chat_id': bot_config.chat_id,
                 'text': message,
                 'parse_mode': 'HTML'
             }
@@ -599,12 +590,18 @@ class TelegramExporter:
             box=box.DOUBLE
         ))
         
+        # Проверка и настройка конфигурации
+        if not self.config_manager.ensure_configured():
+            return
+        
+        # Возможность изменения конфигурации
+        if Confirm.ask("Изменить настройки конфигурации?", default=False):
+            if not self.config_manager.interactive_setup():
+                return
+        
         # Инициализация клиента
         if not await self.initialize_client():
             return
-        
-        # Настройка уведомлений
-        self.setup_bot_notifications()
         
         # Загрузка или выбор каналов
         if self.channels_file.exists() and Confirm.ask("Использовать сохраненный список каналов?"):
