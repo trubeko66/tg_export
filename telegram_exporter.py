@@ -200,34 +200,45 @@ class TelegramExporter:
                 self.console.print(table)
                 
                 # Отображение навигации
-                nav_text = Text()
+                nav_parts = []
                 if current_page > 0:
-                    nav_text.append("[p]", style="cyan")
-                    nav_text.append(" - предыдущая страница  ")
+                    nav_parts.append("[cyan][p][/cyan] - предыдущая страница")
                 if current_page < total_pages - 1:
-                    nav_text.append("[n]", style="cyan")
-                    nav_text.append(" - следующая страница  ")
-                nav_text.append("[s]", style="green")
-                nav_text.append(" - выбрать каналы  ")
-                nav_text.append("[q]", style="red")
-                nav_text.append(" - выход")
+                    nav_parts.append("[cyan][n][/cyan] - следующая страница")
+                nav_parts.append("[green][s][/green] - выбрать каналы")
+                nav_parts.append("[red][q][/red] - выход")
                 
+                nav_text = "  |  ".join(nav_parts)
                 self.console.print(f"\n{nav_text}")
+                self.console.print(f"\n[bold yellow]Навигация:[/bold yellow] Страница {current_page + 1} из {total_pages}")
                 
                 # Получение команды от пользователя
-                command = Prompt.ask("\nВведите команду").lower().strip()
+                command = Prompt.ask("\n[bold]Введите команду[/bold] ([cyan]p[/cyan]/[cyan]n[/cyan]/[green]s[/green]/[red]q[/red])").lower().strip()
                 
-                if command == 'p' and current_page > 0:
-                    current_page -= 1
-                elif command == 'n' and current_page < total_pages - 1:
-                    current_page += 1
+                if command == 'p':
+                    if current_page > 0:
+                        current_page -= 1
+                    else:
+                        self.console.print("[yellow]⚠ Вы уже на первой странице[/yellow]")
+                        input("Нажмите Enter для продолжения...")
+                elif command == 'n':
+                    if current_page < total_pages - 1:
+                        current_page += 1
+                    else:
+                        self.console.print("[yellow]⚠ Вы уже на последней странице[/yellow]")
+                        input("Нажмите Enter для продолжения...")
                 elif command == 's':
                     break
                 elif command == 'q':
                     return
                 else:
-                    self.console.print("[yellow]Неверная команда. Используйте p/n/s/q[/yellow]")
-                    input("Нажмите Enter для продолжения...")
+                    self.console.print("[red]❌ Неверная команда![/red]")
+                    self.console.print("Доступные команды:")
+                    self.console.print("  [cyan]p[/cyan] - предыдущая страница")
+                    self.console.print("  [cyan]n[/cyan] - следующая страница") 
+                    self.console.print("  [green]s[/green] - выбрать каналы")
+                    self.console.print("  [red]q[/red] - выход")
+                    input("\nНажмите Enter для продолжения...")
             
             # Отображение всех каналов для выбора с поиском
             self.console.clear()
