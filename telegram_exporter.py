@@ -162,8 +162,29 @@ class TelegramExporter:
         except Exception as e:
             self.logger.error(f"Error saving channels: {e}")
     
+    def display_channels_page(self, dialogs: list, page: int, page_size: int = 10) -> Table:
+        """Отображение страницы каналов"""
+        start_idx = page * page_size
+        end_idx = min(start_idx + page_size, len(dialogs))
+        
+        table = Table(title=f"Доступные каналы (страница {page + 1} из {(len(dialogs) - 1) // page_size + 1})", box=box.ROUNDED)
+        table.add_column("№", style="cyan", width=4)
+        table.add_column("Название", style="green", max_width=40)
+        table.add_column("Username", style="blue", max_width=20)
+        table.add_column("Участников", style="yellow", justify="right")
+        
+        for i in range(start_idx, end_idx):
+            dialog = dialogs[i]
+            username = f"@{dialog.entity.username}" if dialog.entity.username else "—"
+            participants = getattr(dialog.entity, 'participants_count', 0)
+            # Обрезаем длинные названия
+            title = dialog.title[:37] + "..." if len(dialog.title) > 40 else dialog.title
+            table.add_row(str(i + 1), title, username, str(participants))
+        
+        return table
+
     async def select_channels(self):
-        """Выбор каналов для мониторинга"""
+        """Выбор каналов для мониторинга с постраничным отображением"""
         self.console.print("\n[bold blue]Получение списка каналов...[/bold blue]")
         
         try:
@@ -176,30 +197,101 @@ class TelegramExporter:
                 self.console.print("[yellow]Каналы не найдены[/yellow]")
                 return
             
-            # Создание таблицы для выбора
-            table = Table(title="Доступные каналы", box=box.ROUNDED)
+            # Постраничное отображение
+            page_size = 10
+            current_page = 0
+            total_pages = (len(dialogs) - 1) // page_size + 1
+            
+            while True:
+                # Очистка экрана и отображение текущей страницы
+                self.console.clear()
+                table = self.display_channels_page(dialogs, current_page, page_size)
+                self.console.print(table)
+                
+                # Отображение навигации
+                nav_text = Text()
+                if current_page > 0:
+                    nav_text.append("[p]", style="cyan")
+                    nav_text.append(" - предыдущая страница  ")
+                if current_page < total_pages - 1:
+                    nav_text.append("[n]", style="cyan")
+                    nav_text.append(" - следующая страница  ")
+                nav_text.append("[s]", style="green")
+                nav_text.append(" - выбрать каналы  ")
+                nav_text.append("[q]", style="red")
+                nav_text.append(" - выход")
+                
+                self.console.print(f"\n{nav_text}")
+                
+                # Получение команды от пользователя
+                command = Prompt.ask("\nВведите команду").lower().strip()
+                
+                if command == 'p' and current_page > 0:
+                    current_page -= 1
+                elif command == 'n' and current_page < total_pages - 1:
+                    current_page += 1
+                elif command == 's':
+                    break
+                elif command == 'q':
+                    return
+                else:
+                    self.console.print("[yellow]Неверная команда. Используйте p/n/s/q[/yellow]")
+                    input("Нажмите Enter для продолжения...")
+            
+            # Отображение всех каналов для выбора с поиском
+            self.console.clear()
+            self.console.print("\n[bold green]Выбор каналов для мониторинга[/bold green]")
+            
+            # Опция поиска
+            search_query = Prompt.ask("\nВведите часть названия для поиска (или Enter для пропуска)", default="")
+            
+            if search_query:
+                filtered_dialogs = []
+                for dialog in dialogs:
+                    if (search_query.lower() in dialog.title.lower() or 
+                        (dialog.entity.username and search_query.lower() in dialog.entity.username.lower())):
+                        filtered_dialogs.append(dialog)
+                
+                if filtered_dialogs:
+                    self.console.print(f"\n[cyan]Найдено каналов по запросу '{search_query}': {len(filtered_dialogs)}[/cyan]")
+                    dialogs = filtered_dialogs
+                else:
+                    self.console.print(f"[yellow]По запросу '{search_query}' ничего не найдено. Показываю все каналы.[/yellow]")
+            
+            # Создание финальной таблицы для выбора
+            table = Table(title="Каналы для выбора", box=box.ROUNDED)
             table.add_column("№", style="cyan", width=4)
-            table.add_column("Название", style="green")
-            table.add_column("Username", style="blue")
+            table.add_column("Название", style="green", max_width=40)
+            table.add_column("Username", style="blue", max_width=20)
             table.add_column("Участников", style="yellow", justify="right")
             
             for i, dialog in enumerate(dialogs, 1):
                 username = f"@{dialog.entity.username}" if dialog.entity.username else "—"
                 participants = getattr(dialog.entity, 'participants_count', 0)
-                table.add_row(str(i), dialog.title, username, str(participants))
+                title = dialog.title[:37] + "..." if len(dialog.title) > 40 else dialog.title
+                table.add_row(str(i), title, username, str(participants))
             
             self.console.print(table)
             
             # Выбор каналов
             selection = Prompt.ask(
-                "\nВведите номера каналов через запятую (или 'all' для всех)"
+                f"\nВведите номера каналов через запятую (1-{len(dialogs)}) или 'all' для всех"
             )
             
             if selection.lower() == 'all':
                 selected_indices = list(range(len(dialogs)))
             else:
-                selected_indices = [int(x.strip()) - 1 for x in selection.split(',') 
-                                 if x.strip().isdigit()]
+                try:
+                    selected_indices = []
+                    for x in selection.split(','):
+                        num = int(x.strip())
+                        if 1 <= num <= len(dialogs):
+                            selected_indices.append(num - 1)
+                        else:
+                            self.console.print(f"[yellow]Номер {num} вне допустимого диапазона (1-{len(dialogs)})[/yellow]")
+                except ValueError:
+                    self.console.print("[red]Ошибка: введите числа через запятую[/red]")
+                    return
             
             # Добавление выбранных каналов
             for i in selected_indices:
@@ -366,6 +458,14 @@ class TelegramExporter:
                                 media_type = "Другое медиа"
                         
                         # Создание объекта данных сообщения
+                        # Безопасное получение количества ответов
+                        replies_count = 0
+                        if hasattr(message, 'replies') and message.replies:
+                            if hasattr(message.replies, 'replies'):
+                                replies_count = message.replies.replies
+                            elif hasattr(message.replies, 'replies_pts'):
+                                replies_count = getattr(message.replies, 'replies_pts', 0)
+                        
                         msg_data = MessageData(
                             id=message.id,
                             date=message.date,
@@ -375,7 +475,7 @@ class TelegramExporter:
                             media_path=media_path,
                             views=getattr(message, 'views', 0) or 0,
                             forwards=getattr(message, 'forwards', 0) or 0,
-                            replies=getattr(message, 'replies', {}).get('replies', 0) if hasattr(message, 'replies') and message.replies else 0,
+                            replies=replies_count,
                             edited=message.edit_date
                         )
                         
