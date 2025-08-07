@@ -346,49 +346,49 @@ class TelegramExporter:
             
             try:
                 async for message in self.client.iter_messages(entity, min_id=min_id):
-                try:
-                    # Загрузка медиафайлов
-                    media_path = None
-                    media_type = None
-                    
-                    if message.media:
-                        media_path = await media_downloader.download_media(self.client, message)
-                        if media_path:
-                            file_size = media_downloader.get_file_size_mb(channel_dir / media_path)
-                            total_size += file_size
+                    try:
+                        # Загрузка медиафайлов
+                        media_path = None
+                        media_type = None
+                        
+                        if message.media:
+                            media_path = await media_downloader.download_media(self.client, message)
+                            if media_path:
+                                file_size = media_downloader.get_file_size_mb(channel_dir / media_path)
+                                total_size += file_size
+                                
+                            # Определение типа медиа
+                            if isinstance(message.media, MessageMediaPhoto):
+                                media_type = "Фото"
+                            elif isinstance(message.media, MessageMediaDocument):
+                                media_type = "Документ"
+                            else:
+                                media_type = "Другое медиа"
+                        
+                        # Создание объекта данных сообщения
+                        msg_data = MessageData(
+                            id=message.id,
+                            date=message.date,
+                            text=message.text or "",
+                            author=None,  # Каналы обычно не показывают авторов
+                            media_type=media_type,
+                            media_path=media_path,
+                            views=getattr(message, 'views', 0) or 0,
+                            forwards=getattr(message, 'forwards', 0) or 0,
+                            replies=getattr(message, 'replies', {}).get('replies', 0) if hasattr(message, 'replies') and message.replies else 0,
+                            edited=message.edit_date
+                        )
+                        
+                        messages_data.append(msg_data)
+                        new_messages_count += 1
+                        
+                        # Обновляем последний ID сообщения
+                        if message.id > channel.last_message_id:
+                            channel.last_message_id = message.id
                             
-                        # Определение типа медиа
-                        if isinstance(message.media, MessageMediaPhoto):
-                            media_type = "Фото"
-                        elif isinstance(message.media, MessageMediaDocument):
-                            media_type = "Документ"
-                        else:
-                            media_type = "Другое медиа"
-                    
-                    # Создание объекта данных сообщения
-                    msg_data = MessageData(
-                        id=message.id,
-                        date=message.date,
-                        text=message.text or "",
-                        author=None,  # Каналы обычно не показывают авторов
-                        media_type=media_type,
-                        media_path=media_path,
-                        views=getattr(message, 'views', 0) or 0,
-                        forwards=getattr(message, 'forwards', 0) or 0,
-                        replies=getattr(message, 'replies', {}).get('replies', 0) if hasattr(message, 'replies') and message.replies else 0,
-                        edited=message.edit_date
-                    )
-                    
-                    messages_data.append(msg_data)
-                    new_messages_count += 1
-                    
-                    # Обновляем последний ID сообщения
-                                         if message.id > channel.last_message_id:
-                         channel.last_message_id = message.id
-                         
-                 except Exception as e:
-                     self.logger.error(f"Error processing message {message.id}: {e}")
-                     self.stats.export_errors += 1
+                    except Exception as e:
+                        self.logger.error(f"Error processing message {message.id}: {e}")
+                        self.stats.export_errors += 1
             
             except FloodWaitError as e:
                 self.logger.warning(f"FloodWait error for channel {channel.title}: waiting {e.seconds} seconds")
