@@ -58,6 +58,18 @@ class BaseExporter:
         # Удаляем некоторые проблемные Unicode символы
         cleaned = re.sub(r'[\u2060-\u206f]', '', cleaned)  # Word joiner и другие
         
+        # Удаляем или заменяем последовательности, которые могут вызвать ошибки KaTeX
+        # Паттерны, которые KaTeX может интерпретировать как LaTeX команды
+        katex_problematic_patterns = [
+            (r'\\-', '-'),          # \- заменяем на обычный дефис
+            (r'\\\w+', ''),         # Удаляем последовательности типа \command
+            (r'\$[^$]*\$', ''),     # Удаляем потенциальные математические формулы
+            (r'\\[{}[\]()]', ''),   # Удаляем экранированные скобки, которые могут конфликтовать
+        ]
+        
+        for pattern, replacement in katex_problematic_patterns:
+            cleaned = re.sub(pattern, replacement, cleaned)
+        
         return cleaned.strip()
 
 
@@ -260,7 +272,10 @@ class MarkdownExporter(BaseExporter):
     
     def _generate_markdown(self, messages: List[MessageData]) -> str:
         """Генерация Markdown контента"""
-        md_content = f"""# {self.channel_name}
+        # Безопасное название канала для заголовка
+        safe_channel_name = self._safe_markdown_text(self.channel_name)
+        
+        md_content = f"""# {safe_channel_name}
 
 **Экспорт от:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
 **Всего сообщений:** {len(messages)}
@@ -290,10 +305,9 @@ class MarkdownExporter(BaseExporter):
             
             # Текст сообщения
             if msg.text:
-                cleaned_text = self.clean_text(msg.text)
-                # Экранирование специальных символов Markdown
-                cleaned_text = self._escape_markdown(cleaned_text)
-                md_content += f"{cleaned_text}\n\n"
+                # Используем безопасную функцию для предотвращения ошибок KaTeX
+                safe_text = self._safe_markdown_text(msg.text)
+                md_content += f"{safe_text}\n\n"
             
             # Статистика
             stats_parts = []
@@ -316,11 +330,68 @@ class MarkdownExporter(BaseExporter):
     
     def _escape_markdown(self, text: str) -> str:
         """Экранирование специальных символов Markdown"""
-        # Экранируем основные символы Markdown
-        special_chars = ['\\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!']
-        for char in special_chars:
-            text = text.replace(char, f'\\{char}')
+        if not text:
+            return ""
+        
+        # Сначала экранируем обратные слеши, чтобы избежать двойного экранирования
+        text = text.replace('\\', '\\\\')
+        
+        # Экранируем символы, которые могут конфликтовать с KaTeX
+        # Порядок важен - некоторые символы нужно обрабатывать в определенной последовательности
+        replacements = [
+            ('$', '\\$'),      # Экранирование знака доллара (KaTeX delimiter)
+            ('`', '\\`'),      # Обратные кавычки
+            ('*', '\\*'),      # Звездочки
+            ('_', '\\_'),      # Подчеркивания
+            ('{', '\\{'),      # Фигурные скобки
+            ('}', '\\}'),      # Фигурные скобки
+            ('[', '\\['),      # Квадратные скобки
+            (']', '\\]'),      # Квадратные скобки
+            ('(', '\\('),      # Круглые скобки
+            (')', '\\)'),      # Круглые скобки
+            ('#', '\\#'),      # Решетка
+            ('+', '\\+'),      # Плюс
+            ('-', '\\-'),      # Дефис (основная причина ошибки KaTeX)
+            ('.', '\\.'),      # Точка
+            ('!', '\\!'),      # Восклицательный знак
+            ('|', '\\|'),      # Вертикальная черта
+            ('^', '\\^'),      # Каретка
+            ('~', '\\~'),      # Тильда
+        ]
+        
+        for original, escaped in replacements:
+            text = text.replace(original, escaped)
+        
+        # Дополнительная обработка для предотвращения конфликтов с KaTeX
+        # Экранирование последовательностей, которые KaTeX может интерпретировать как команды
+        text = text.replace('\\-', '\\\\-')  # Двойное экранирование для \-
+        text = text.replace('\\\\\\-', '\\\\-')  # Исправление тройного экранирования
+        
         return text
+    
+    def _safe_markdown_text(self, text: str) -> str:
+        """Создание безопасного для KaTeX текста Markdown"""
+        if not text:
+            return ""
+        
+        # Сначала очищаем от проблемных символов
+        cleaned = self.clean_text(text)
+        
+        # Применяем минимальное экранирование только для критичных символов
+        # Избегаем экранирования дефисов и других символов, которые вызывают проблемы с KaTeX
+        safe_replacements = [
+            ('*', '\\*'),      # Звездочки для выделения
+            ('_', '\\_'),      # Подчеркивания для выделения
+            ('`', '\\`'),      # Обратные кавычки для кода
+            ('#', '\\#'),      # Решетка для заголовков
+            ('[', '\\['),      # Квадратные скобки для ссылок
+            (']', '\\]'),      # Квадратные скобки для ссылок
+        ]
+        
+        for original, escaped in safe_replacements:
+            cleaned = cleaned.replace(original, escaped)
+        
+        return cleaned
 
 
 class MediaDownloader:
