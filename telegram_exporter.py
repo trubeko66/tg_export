@@ -19,6 +19,7 @@ from dataclasses import dataclass, asdict
 import html
 import markdown
 
+from content_filter import ContentFilter, FilterConfig
 from telethon import TelegramClient, events
 from telethon.tl.types import Channel, Chat, User, MessageMediaPhoto, MessageMediaDocument, Message
 from telethon.errors import SessionPasswordNeededError, FloodWaitError
@@ -71,6 +72,9 @@ class TelegramExporter:
         
         # Инициализация менеджера конфигурации
         self.config_manager = ConfigManager()
+
+        # Инициализация фильтра контента
+        self.content_filter = ContentFilter()
         
         # Настройка логирования
         self.setup_logging()
@@ -429,6 +433,13 @@ class TelegramExporter:
             html_exporter = HTMLExporter(channel.title, channel_dir)
             md_exporter = MarkdownExporter(channel.title, channel_dir)
             media_downloader = MediaDownloader(channel_dir)
+
+            # Проверка фильтрации
+            should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
+            if should_filter:
+                self.logger.info(f"Message {message.id} filtered: {filter_reason}")
+                self.stats.filtered_messages += 1
+                continue  # Пропускаем это сообщение
             
             # Получение сообщений
             messages_data = []
