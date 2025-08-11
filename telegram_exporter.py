@@ -59,6 +59,7 @@ class ExportStats:
     total_size_mb: float = 0.0
     last_export_time: Optional[str] = None
     export_errors: int = 0
+    filtered_messages: int = 0
 
 
 class TelegramExporter:
@@ -359,6 +360,7 @@ class TelegramExporter:
         stats_text.append(f"Всего сообщений: {self.stats.total_messages}\n", style="green")
         stats_text.append(f"Объем данных: {self.stats.total_size_mb:.2f} МБ\n", style="yellow")
         stats_text.append(f"Ошибки: {self.stats.export_errors}\n", style="red")
+        stats_text.append(f"Отфильтровано: {self.stats.filtered_messages}\n", style="magenta")
         stats_text.append(f"Последний экспорт: {self.stats.last_export_time or 'Никогда'}\n", style="blue")
         
         layout["right"].update(Panel(stats_text, title="Статистика"))
@@ -434,13 +436,6 @@ class TelegramExporter:
             md_exporter = MarkdownExporter(channel.title, channel_dir)
             media_downloader = MediaDownloader(channel_dir)
 
-            # Проверка фильтрации
-            should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
-            if should_filter:
-                self.logger.info(f"Message {message.id} filtered: {filter_reason}")
-                self.stats.filtered_messages += 1
-                continue  # Пропускаем это сообщение
-            
             # Получение сообщений
             messages_data = []
             total_size = 0.0
@@ -452,6 +447,13 @@ class TelegramExporter:
             try:
                 async for message in self.client.iter_messages(entity, min_id=min_id):
                     try:
+                        # Фильтрация рекламных и промо-сообщений
+                        should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
+                        if should_filter:
+                            self.logger.info(f"Message {message.id} filtered: {filter_reason}")
+                            self.stats.filtered_messages += 1
+                            continue
+
                         # Загрузка медиафайлов
                         media_path = None
                         media_type = None
