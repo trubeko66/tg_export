@@ -37,6 +37,7 @@ class BotConfig:
 class StorageConfig:
     """Конфигурация локального хранилища"""
     channels_path: Optional[str] = ".channels"
+    export_base_dir: Optional[str] = "exports"
 
 
 @dataclass
@@ -378,9 +379,12 @@ class ConfigManager:
         self.console.print("\n[bold blue]Настройка хранилища каналов[/bold blue]")
         default_path = storage.channels_path or ".channels"
         new_path = Prompt.ask("Путь к локальному файлу со списком каналов", default=default_path)
+        export_dir_default = storage.export_base_dir or "exports"
+        export_dir = Prompt.ask("Каталог для сохранения экспортируемых каналов", default=export_dir_default)
         self.config.storage.channels_path = new_path
+        self.config.storage.export_base_dir = export_dir
         self.save_config()
-        self.console.print(f"[green]✓ Путь сохранен: {new_path}[/green]")
+        self.console.print(f"[green]✓ Пути сохранены: channels={new_path}, export_dir={export_dir}[/green]")
 
     def setup_webdav_config(self, force_setup: bool = False):
         """Настройка WebDAV синхронизации"""

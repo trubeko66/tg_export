@@ -644,8 +644,15 @@ class TelegramExporter:
         try:
             self.logger.info(f"Starting export for channel: {channel.title}")
             
-            # Создание директории для канала
-            channel_dir = Path(channel.title.replace('/', '_').replace('\\', '_'))
+            # Создание директории для канала (учет базового каталога из настроек)
+            try:
+                storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
+                base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
+            except Exception:
+                base_dir = 'exports'
+            base_path = Path(base_dir)
+            base_path.mkdir(parents=True, exist_ok=True)
+            channel_dir = base_path / channel.title.replace('/', '_').replace('\\', '_')
             channel_dir.mkdir(exist_ok=True)
             
             # Получение канала
