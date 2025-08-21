@@ -80,6 +80,33 @@ class TelegramExporter:
         # Настройка логирования
         self.setup_logging()
         
+    # ===== Работа с файлами каналов =====
+    def load_channels_from_file(self, file_path: Path) -> bool:
+        """Загрузка списка каналов из произвольного JSON-файла"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # Ожидается список объектов ChannelInfo
+            self.channels = [ChannelInfo(**item) for item in data]
+            return True
+        except Exception as e:
+            self.logger.error(f"Error loading channels from {file_path}: {e}")
+            self.console.print(f"[red]Ошибка загрузки из файла {file_path}: {e}[/red]")
+            return False
+
+    def save_channels_to_file(self, file_path: Path) -> bool:
+        """Сохранение списка каналов в произвольный JSON-файл для редактирования"""
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump([asdict(channel) for channel in self.channels], f,
+                          ensure_ascii=False, indent=2)
+            self.console.print(f"[green]✓ Список каналов сохранен в {file_path}[/green]")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving channels to {file_path}: {e}")
+            self.console.print(f"[red]Ошибка сохранения в файл {file_path}: {e}[/red]")
+            return False
+
     def setup_logging(self):
         """Настройка системы логирования"""
         logging.basicConfig(
@@ -158,12 +185,13 @@ class TelegramExporter:
         except Exception as e:
             self.logger.error(f"Error saving channels: {e}")
     
-    def display_channels_page(self, dialogs: list, page: int, page_size: int = 10) -> Table:
+    def display_channels_page(self, dialogs: list, page: int, selected_ids: Optional[set] = None, page_size: int = 10) -> Table:
         """Отображение страницы каналов"""
         start_idx = page * page_size
         end_idx = min(start_idx + page_size, len(dialogs))
         
         table = Table(title=f"Доступные каналы (страница {page + 1} из {(len(dialogs) - 1) // page_size + 1})", box=box.ROUNDED)
+        table.add_column("✔", style="magenta", width=2)
         table.add_column("№", style="cyan", width=4)
         table.add_column("Название", style="green", max_width=40)
         table.add_column("Username", style="blue", max_width=20)
@@ -175,50 +203,55 @@ class TelegramExporter:
             participants = getattr(dialog.entity, 'participants_count', 0)
             # Обрезаем длинные названия
             title = dialog.title[:37] + "..." if len(dialog.title) > 40 else dialog.title
-            table.add_row(str(i + 1), title, username, str(participants))
+            is_selected = "✓" if (selected_ids and getattr(dialog.entity, 'id', None) in selected_ids) else ""
+            table.add_row(is_selected, str(i + 1), title, username, str(participants))
         
         return table
 
     async def select_channels(self):
-        """Выбор каналов для мониторинга с постраничным отображением"""
+        """Выбор каналов для мониторинга с постраничным отображением и удобными командами"""
         self.console.print("\n[bold blue]Получение списка каналов...[/bold blue]")
         
         try:
-            dialogs = []
+            # Получаем список каналов-бродкастов
+            all_dialogs = []
             async for dialog in self.client.iter_dialogs():
                 if hasattr(dialog.entity, 'broadcast') and dialog.entity.broadcast:
-                    dialogs.append(dialog)
+                    all_dialogs.append(dialog)
             
-            if not dialogs:
+            if not all_dialogs:
                 self.console.print("[yellow]Каналы не найдены[/yellow]")
                 return
             
-            # Постраничное отображение
+            # Текущее отображаемое множество и выбранные каналы (по id)
+            dialogs = list(all_dialogs)
+            selected_ids: set = set()
+            
             page_size = 10
             current_page = 0
-            total_pages = (len(dialogs) - 1) // page_size + 1
+            
+            def total_pages_for(lst: list) -> int:
+                return (len(lst) - 1) // page_size + 1 if lst else 1
             
             while True:
+                total_pages = total_pages_for(dialogs)
+                if current_page >= total_pages:
+                    current_page = max(0, total_pages - 1)
+                
                 # Очистка экрана и отображение текущей страницы
                 self.console.clear()
-                table = self.display_channels_page(dialogs, current_page, page_size)
+                table = self.display_channels_page(dialogs, current_page, selected_ids, page_size)
                 self.console.print(table)
                 
-                # Отображение навигации
-                nav_parts = []
-                if current_page > 0:
-                    nav_parts.append("[cyan][p][/cyan] - предыдущая страница")
-                if current_page < total_pages - 1:
-                    nav_parts.append("[cyan][n][/cyan] - следующая страница")
-                nav_parts.append("[green][s][/green] - выбрать каналы")
-                nav_parts.append("[red][q][/red] - выход")
+                # Инструкции
+                self.console.print(
+                    "\n[bold yellow]Команды:[/bold yellow] p/n — страница | sa/sd — выделить/снять страницу | "
+                    "1,3-5 — переключить номера | f — поиск | x — очистить | s — продолжить | q — выход"
+                )
+                self.console.print(f"[dim]Страница {current_page + 1} из {total_pages} | Выбрано: {len(selected_ids)}[/dim]")
                 
-                nav_text = "  |  ".join(nav_parts)
-                self.console.print(f"\n{nav_text}")
-                self.console.print(f"\n[bold yellow]Навигация:[/bold yellow] Страница {current_page + 1} из {total_pages}")
-                
-                # Получение команды от пользователя
-                command = Prompt.ask("\n[bold]Введите команду[/bold] ([cyan]p[/cyan]/[cyan]n[/cyan]/[green]s[/green]/[red]q[/red])").lower().strip()
+                # Получение команды
+                command = Prompt.ask("\nВведите команду").strip().lower()
                 
                 if command == 'p':
                     if current_page > 0:
@@ -232,88 +265,110 @@ class TelegramExporter:
                     else:
                         self.console.print("[yellow]⚠ Вы уже на последней странице[/yellow]")
                         input("Нажмите Enter для продолжения...")
+                elif command == 'sa':
+                    # Select All on page
+                    start_idx = current_page * page_size
+                    end_idx = min(start_idx + page_size, len(dialogs))
+                    for i in range(start_idx, end_idx):
+                        selected_ids.add(getattr(dialogs[i].entity, 'id', None))
+                elif command == 'sd':
+                    # Select None (deselect) on page
+                    start_idx = current_page * page_size
+                    end_idx = min(start_idx + page_size, len(dialogs))
+                    for i in range(start_idx, end_idx):
+                        selected_ids.discard(getattr(dialogs[i].entity, 'id', None))
+                elif command == 'x':
+                    selected_ids.clear()
+                elif command == 'f':
+                    query = Prompt.ask("Поиск по названию/username (пусто — показать все)", default="")
+                    q = query.strip().lower()
+                    if not q:
+                        dialogs = list(all_dialogs)
+                    else:
+                        filtered_dialogs = []
+                        for d in all_dialogs:
+                            title_match = q in (d.title or '').lower()
+                            uname = getattr(d.entity, 'username', None)
+                            uname_match = (uname and q in uname.lower())
+                            if title_match or uname_match:
+                                filtered_dialogs.append(d)
+                        dialogs = filtered_dialogs
+                    current_page = 0
                 elif command == 's':
                     break
                 elif command == 'q':
                     return
                 else:
-                    self.console.print("[red]❌ Неверная команда![/red]")
-                    self.console.print("Доступные команды:")
-                    self.console.print("  [cyan]p[/cyan] - предыдущая страница")
-                    self.console.print("  [cyan]n[/cyan] - следующая страница") 
-                    self.console.print("  [green]s[/green] - выбрать каналы")
-                    self.console.print("  [red]q[/red] - выход")
-                    input("\nНажмите Enter для продолжения...")
-            
-            # Отображение всех каналов для выбора с поиском
-            self.console.clear()
-            self.console.print("\n[bold green]Выбор каналов для мониторинга[/bold green]")
-            
-            # Опция поиска
-            search_query = Prompt.ask("\nВведите часть названия для поиска (или Enter для пропуска)", default="")
-            
-            if search_query:
-                filtered_dialogs = []
-                for dialog in dialogs:
-                    if (search_query.lower() in dialog.title.lower() or 
-                        (dialog.entity.username and search_query.lower() in dialog.entity.username.lower())):
-                        filtered_dialogs.append(dialog)
-                
-                if filtered_dialogs:
-                    self.console.print(f"\n[cyan]Найдено каналов по запросу '{search_query}': {len(filtered_dialogs)}[/cyan]")
-                    dialogs = filtered_dialogs
-                else:
-                    self.console.print(f"[yellow]По запросу '{search_query}' ничего не найдено. Показываю все каналы.[/yellow]")
-            
-            # Создание финальной таблицы для выбора
-            table = Table(title="Каналы для выбора", box=box.ROUNDED)
-            table.add_column("№", style="cyan", width=4)
-            table.add_column("Название", style="green", max_width=40)
-            table.add_column("Username", style="blue", max_width=20)
-            table.add_column("Участников", style="yellow", justify="right")
-            
-            for i, dialog in enumerate(dialogs, 1):
-                username = f"@{dialog.entity.username}" if dialog.entity.username else "—"
-                participants = getattr(dialog.entity, 'participants_count', 0)
-                title = dialog.title[:37] + "..." if len(dialog.title) > 40 else dialog.title
-                table.add_row(str(i), title, username, str(participants))
-            
-            self.console.print(table)
-            
-            # Выбор каналов
-            selection = Prompt.ask(
-                f"\nВведите номера каналов через запятую (1-{len(dialogs)}) или 'all' для всех"
-            )
-            
-            if selection.lower() == 'all':
-                selected_indices = list(range(len(dialogs)))
-            else:
-                try:
-                    selected_indices = []
-                    for x in selection.split(','):
-                        num = int(x.strip())
-                        if 1 <= num <= len(dialogs):
-                            selected_indices.append(num - 1)
+                    # попытка разобрать как список номеров/диапазонов
+                    tokens = [t.strip() for t in command.split(',') if t.strip()]
+                    if not tokens:
+                        self.console.print("[red]❌ Неверная команда[/red]")
+                        input("Нажмите Enter для продолжения...")
+                        continue
+                    ok = True
+                    for token in tokens:
+                        if '-' in token:
+                            parts = token.split('-')
+                            if len(parts) != 2:
+                                ok = False
+                                break
+                            try:
+                                a = int(parts[0])
+                                b = int(parts[1])
+                            except ValueError:
+                                ok = False
+                                break
+                            if a > b:
+                                a, b = b, a
+                            for num in range(a, b + 1):
+                                if 1 <= num <= len(dialogs):
+                                    dlg = dialogs[num - 1]
+                                    dlg_id = getattr(dlg.entity, 'id', None)
+                                    if dlg_id in selected_ids:
+                                        selected_ids.discard(dlg_id)
+                                    else:
+                                        selected_ids.add(dlg_id)
                         else:
-                            self.console.print(f"[yellow]Номер {num} вне допустимого диапазона (1-{len(dialogs)})[/yellow]")
-                except ValueError:
-                    self.console.print("[red]Ошибка: введите числа через запятую[/red]")
-                    return
+                            try:
+                                num = int(token)
+                            except ValueError:
+                                ok = False
+                                break
+                            if 1 <= num <= len(dialogs):
+                                dlg = dialogs[num - 1]
+                                dlg_id = getattr(dlg.entity, 'id', None)
+                                if dlg_id in selected_ids:
+                                    selected_ids.discard(dlg_id)
+                                else:
+                                    selected_ids.add(dlg_id)
+                            else:
+                                ok = False
+                                break
+                    if not ok:
+                        self.console.print("[red]❌ Неверный формат. Используйте числа и диапазоны, например: 1,3-6[/red]")
+                        input("Нажмите Enter для продолжения...")
+                        continue
             
-            # Добавление выбранных каналов
-            for i in selected_indices:
-                if 0 <= i < len(dialogs):
-                    dialog = dialogs[i]
-                    channel_info = ChannelInfo(
-                        id=dialog.entity.id,
-                        title=dialog.title,
-                        username=dialog.entity.username
-                    )
-                    self.channels.append(channel_info)
+            # Финализация выбора
+            if not selected_ids:
+                self.console.print("[yellow]Вы ничего не выбрали[/yellow]")
+                return
+            
+            # Преобразуем выбранные id в объекты ChannelInfo (по оригинальному списку)
+            selected_map = {getattr(d.entity, 'id', None): d for d in all_dialogs}
+            for dlg_id in selected_ids:
+                d = selected_map.get(dlg_id)
+                if d is None:
+                    continue
+                self.channels.append(ChannelInfo(
+                    id=getattr(d.entity, 'id', 0),
+                    title=d.title,
+                    username=getattr(d.entity, 'username', None)
+                ))
             
             self.save_channels()
             self.console.print(f"[green]✓ Выбрано {len(self.channels)} каналов[/green]")
-            
+        
         except Exception as e:
             self.console.print(f"[red]Ошибка выбора каналов: {e}[/red]")
             self.logger.error(f"Channel selection error: {e}")
@@ -623,15 +678,47 @@ class TelegramExporter:
             if not self.config_manager.interactive_setup():
                 return
         
+        # Предложить импорт/экспорт списка каналов в произвольный JSON
+        try:
+            self.console.print(Panel(
+                "Вы можете импортировать/экспортировать список каналов для ручного редактирования в JSON.\n"
+                "Доступные действия:\n"
+                "- [i]import[/i] — загрузить из JSON-файла\n"
+                "- [i]export[/i] — сохранить текущий список в JSON\n"
+                "- [i]skip[/i] — пропустить",
+                title="Импорт/Экспорт каналов", box=box.ROUNDED
+            ))
+            io_action = Prompt.ask("Действие", choices=["import", "export", "skip"], default="skip")
+            if io_action == "import":
+                path_str = Prompt.ask("Путь к JSON-файлу для импорта", default="channels.json")
+                file_path = Path(path_str)
+                if not file_path.exists():
+                    self.console.print(f"[red]Файл {file_path} не найден[/red]")
+                else:
+                    if self.load_channels_from_file(file_path):
+                        self.console.print(f"[green]✓ Импортировано каналов: {len(self.channels)}[/green]")
+            elif io_action == "export":
+                # Если каналов пока нет — дадим возможность выбрать, чтобы было что сохранять
+                if not self.channels and Confirm.ask("Список каналов пуст. Выбрать каналы перед экспортом?", default=True):
+                    # Инициализация клиента перед выбором
+                    if not await self.initialize_client():
+                        return
+                    await self.select_channels()
+                path_str = Prompt.ask("Путь для сохранения JSON", default="channels.json")
+                self.save_channels_to_file(Path(path_str))
+        except Exception as e:
+            self.logger.error(f"IO setup error: {e}")
+
         # Инициализация клиента
         if not await self.initialize_client():
             return
         
         # Загрузка или выбор каналов
-        if self.channels_file.exists() and Confirm.ask("Использовать сохраненный список каналов?"):
-            self.load_channels()
-        else:
-            await self.select_channels()
+        if not self.channels:
+            if self.channels_file.exists() and Confirm.ask("Использовать сохраненный список каналов?"):
+                self.load_channels()
+            else:
+                await self.select_channels()
         
         if not self.channels:
             self.console.print("[red]Каналы не выбраны. Завершение работы.[/red]")
