@@ -18,6 +18,8 @@ import time
 from dataclasses import dataclass, asdict
 import html
 import markdown
+import posixpath
+import zipfile
 
 from content_filter import ContentFilter, FilterConfig
 from telethon import TelegramClient, events
@@ -67,18 +69,173 @@ class TelegramExporter:
         self.console = Console()
         self.client: Optional[TelegramClient] = None
         self.channels: List[ChannelInfo] = []
-        self.channels_file = Path('.channels')
         self.stats = ExportStats()
         self.running = True
         
         # Инициализация менеджера конфигурации
         self.config_manager = ConfigManager()
+        # Путь списка каналов из конфигурации
+        try:
+            storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
+            channels_path = getattr(storage_cfg, 'channels_path', '.channels') if storage_cfg else '.channels'
+        except Exception:
+            channels_path = '.channels'
+        self.channels_file = Path(channels_path)
 
         # Инициализация фильтра контента
         self.content_filter = ContentFilter()
         
         # Настройка логирования
         self.setup_logging()
+        
+    # ===== Вспомогательные методы пути хранения =====
+    def _get_channels_file_path(self) -> Path:
+        try:
+            storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
+            channels_path = getattr(storage_cfg, 'channels_path', None)
+            return Path(channels_path) if channels_path else Path('.channels')
+        except Exception:
+            return Path('.channels')
+
+    # ===== WebDAV синхронизация =====
+    def _webdav_enabled(self) -> bool:
+        try:
+            return bool(self.config_manager.config.webdav.enabled)  # type: ignore[attr-defined]
+        except Exception:
+            return False
+
+    def _webdav_build_url(self, base_url: str, path: str) -> str:
+        if not base_url.endswith('/'):
+            base_url += '/'
+        return base_url + path.lstrip('/')
+
+    def _webdav_make_dirs(self, base_url: str, auth: tuple, remote_path: str) -> None:
+        try:
+            import requests
+            dir_path = posixpath.dirname(remote_path) or '/'
+            if dir_path in ('', '/', None):
+                return
+            segments = [seg for seg in dir_path.strip('/').split('/') if seg]
+            current = ''
+            for seg in segments:
+                current = current + '/' + seg
+                url = self._webdav_build_url(base_url, current)
+                resp = requests.request('MKCOL', url, auth=auth)
+                if resp.status_code not in (201, 405):
+                    self.logger.warning(f"MKCOL {url} returned {resp.status_code}")
+        except Exception as e:
+            self.logger.warning(f"WebDAV make dirs error: {e}")
+
+    def _webdav_download(self) -> bool:
+        if not self._webdav_enabled():
+            return False
+        try:
+            import requests
+            webdav = self.config_manager.config.webdav  # type: ignore[attr-defined]
+            base_url = webdav.url or ''
+            remote_path = webdav.remote_path or '/channels/.channels'
+            auth = (webdav.username or '', webdav.password or '')
+            url = self._webdav_build_url(base_url, remote_path)
+            resp = requests.get(url, auth=auth, timeout=30)
+            if resp.status_code == 200:
+                local_path = self._get_channels_file_path()
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(local_path, 'wb') as f:
+                    f.write(resp.content)
+                self.logger.info(f"WebDAV download succeeded: {url} -> {local_path}")
+                return True
+            else:
+                self.logger.warning(f"WebDAV download skipped ({resp.status_code}): {url}")
+                return False
+        except Exception as e:
+            self.logger.error(f"WebDAV download error: {e}")
+            return False
+
+    def _webdav_upload(self) -> bool:
+        if not self._webdav_enabled():
+            return False
+        try:
+            import requests
+            webdav = self.config_manager.config.webdav  # type: ignore[attr-defined]
+            base_url = webdav.url or ''
+            remote_path = webdav.remote_path or '/channels/.channels'
+            auth = (webdav.username or '', webdav.password or '')
+            url = self._webdav_build_url(base_url, remote_path)
+            self._webdav_make_dirs(base_url, auth, remote_path)
+            local_path = self._get_channels_file_path()
+            if not local_path.exists():
+                return False
+            with open(local_path, 'rb') as f:
+                data = f.read()
+            resp = requests.put(url, data=data, auth=auth, timeout=30)
+            if resp.status_code in (200, 201, 204):
+                self.logger.info(f"WebDAV upload succeeded: {local_path} -> {url}")
+                return True
+            else:
+                self.logger.error(f"WebDAV upload failed ({resp.status_code}): {url}")
+                return False
+        except Exception as e:
+            self.logger.error(f"WebDAV upload error: {e}")
+            return False
+
+    async def _webdav_download_and_notify(self):
+        try:
+            webdav = self.config_manager.config.webdav  # type: ignore[attr-defined]
+            if self._webdav_download() and getattr(webdav, 'notify_on_sync', True):
+                await self.send_notification("✅ Синхронизация WebDAV: загрузка списка каналов выполнена успешно")
+        except Exception:
+            pass
+
+    async def _webdav_upload_and_notify(self):
+        try:
+            webdav = self.config_manager.config.webdav  # type: ignore[attr-defined]
+            if self._webdav_upload() and getattr(webdav, 'notify_on_sync', True):
+                await self.send_notification("✅ Синхронизация WebDAV: выгрузка списка каналов выполнена успешно")
+        except Exception:
+            pass
+
+    def _zip_channel_folder(self, channel_dir: Path) -> Optional[Path]:
+        try:
+            if not channel_dir.exists() or not channel_dir.is_dir():
+                return None
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            zip_path = channel_dir.parent / f"{channel_dir.name}_{ts}.zip"
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for root, _, files in os.walk(channel_dir):
+                    for file in files:
+                        full_path = Path(root) / file
+                        arcname = str(full_path.relative_to(channel_dir.parent))
+                        zf.write(full_path, arcname)
+            return zip_path
+        except Exception as e:
+            self.logger.error(f"ZIP archive error for {channel_dir}: {e}")
+            return None
+
+    def _webdav_upload_archive(self, archive_path: Path) -> bool:
+        if not self._webdav_enabled():
+            return False
+        try:
+            import requests
+            webdav = self.config_manager.config.webdav  # type: ignore[attr-defined]
+            base_url = webdav.url or ''
+            remote_dir = webdav.archives_remote_dir or '/channels/archives'
+            auth = (webdav.username or '', webdav.password or '')
+            # ensure remote dir
+            self._webdav_make_dirs(base_url, auth, posixpath.join(remote_dir, 'dummy'))
+            remote_name = archive_path.name
+            url = self._webdav_build_url(base_url, posixpath.join(remote_dir, remote_name))
+            with open(archive_path, 'rb') as f:
+                data = f.read()
+            resp = requests.put(url, data=data, auth=auth, timeout=60)
+            if resp.status_code in (200, 201, 204):
+                self.logger.info(f"Archive uploaded to WebDAV: {url}")
+                return True
+            else:
+                self.logger.error(f"Archive upload failed ({resp.status_code}): {url}")
+                return False
+        except Exception as e:
+            self.logger.error(f"WebDAV archive upload error: {e}")
+            return False
         
     # ===== Работа с файлами каналов =====
     def load_channels_from_file(self, file_path: Path) -> bool:
@@ -166,6 +323,7 @@ class TelegramExporter:
     
     def load_channels(self) -> bool:
         """Загрузка списка каналов из файла"""
+        self.channels_file = self._get_channels_file_path()
         if self.channels_file.exists():
             try:
                 with open(self.channels_file, 'r', encoding='utf-8') as f:
@@ -179,9 +337,17 @@ class TelegramExporter:
     def save_channels(self):
         """Сохранение списка каналов в файл"""
         try:
+            self.channels_file = self._get_channels_file_path()
             with open(self.channels_file, 'w', encoding='utf-8') as f:
                 json.dump([asdict(channel) for channel in self.channels], f, 
                          ensure_ascii=False, indent=2)
+            # WebDAV upload
+            if self._webdav_enabled():
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._webdav_upload_and_notify())
+                except RuntimeError:
+                    self._webdav_upload()
         except Exception as e:
             self.logger.error(f"Error saving channels: {e}")
     
@@ -591,6 +757,16 @@ class TelegramExporter:
                 if new_messages_count > 0:
                     notification = self._create_notification(channel, new_messages_count, True)
                     await self.send_notification(notification)
+                    # Загрузка архива канала (опционально) после успешного экспорта
+                    try:
+                        webdav = self.config_manager.config.webdav  # type: ignore[attr-defined]
+                        if getattr(webdav, 'enabled', False) and getattr(webdav, 'upload_archives', False):
+                            archive = self._zip_channel_folder(channel_dir)
+                            if archive and self._webdav_upload_archive(archive):
+                                if getattr(webdav, 'notify_on_sync', True):
+                                    await self.send_notification(f"✅ Загружен архив канала на WebDAV: {archive.name}")
+                    except Exception as e:
+                        self.logger.error(f"Archive upload flow error: {e}")
                 
                 self.logger.info(f"Successfully exported {len(messages_data)} messages from {channel.title}")
                 
@@ -690,6 +866,9 @@ class TelegramExporter:
             ))
             io_action = Prompt.ask("Действие", choices=["import", "export", "skip"], default="skip")
             if io_action == "import":
+                # Перед импортом попробуем подтянуть актуальный файл с WebDAV
+                if self._webdav_enabled():
+                    await self._webdav_download_and_notify()
                 path_str = Prompt.ask("Путь к JSON-файлу для импорта", default="channels.json")
                 file_path = Path(path_str)
                 if not file_path.exists():
@@ -706,6 +885,9 @@ class TelegramExporter:
                     await self.select_channels()
                 path_str = Prompt.ask("Путь для сохранения JSON", default="channels.json")
                 self.save_channels_to_file(Path(path_str))
+                # После сохранения — выгрузка на WebDAV, если включен и совпадает основной путь
+                if self._webdav_enabled():
+                    await self._webdav_upload_and_notify()
         except Exception as e:
             self.logger.error(f"IO setup error: {e}")
 

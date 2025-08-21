@@ -8,7 +8,7 @@ import json
 import os
 from pathlib import Path
 from typing import Dict, Optional, Any
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from rich.console import Console
 from rich.prompt import Prompt, Confirm
 from rich.panel import Panel
@@ -34,11 +34,36 @@ class BotConfig:
 
 
 @dataclass
+class StorageConfig:
+    """Конфигурация локального хранилища"""
+    channels_path: Optional[str] = ".channels"
+
+
+@dataclass
+class WebDavConfig:
+    """Конфигурация WebDAV синхронизации"""
+    enabled: bool = False
+    url: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    remote_path: Optional[str] = "/channels/.channels"
+    auto_sync: bool = False
+    notify_on_sync: bool = True
+    upload_archives: bool = False
+    archives_remote_dir: Optional[str] = "/channels/archives"
+
+
+@dataclass
 class AppConfig:
     """Общая конфигурация приложения"""
     telegram: TelegramConfig
     bot: BotConfig
     first_run: bool = True
+    storage: StorageConfig = StorageConfig()
+    webdav: WebDavConfig = WebDavConfig()
+
+
+    
 
 
 class ConfigManager:
@@ -59,10 +84,14 @@ class ConfigManager:
                 telegram_config = TelegramConfig(**data.get('telegram', {}))
                 bot_config = BotConfig(**data.get('bot', {}))
                 
+                storage_cfg = StorageConfig(**data.get('storage', {})) if isinstance(data.get('storage', {}), dict) else StorageConfig()
+                webdav_cfg = WebDavConfig(**data.get('webdav', {})) if isinstance(data.get('webdav', {}), dict) else WebDavConfig()
                 return AppConfig(
                     telegram=telegram_config,
                     bot=bot_config,
-                    first_run=data.get('first_run', True)
+                    first_run=data.get('first_run', True),
+                    storage=storage_cfg,
+                    webdav=webdav_cfg
                 )
             except Exception as e:
                 self.console.print(f"[yellow]Ошибка загрузки конфигурации: {e}[/yellow]")
@@ -72,7 +101,9 @@ class ConfigManager:
         return AppConfig(
             telegram=TelegramConfig(),
             bot=BotConfig(),
-            first_run=True
+            first_run=True,
+            storage=StorageConfig(),
+            webdav=WebDavConfig()
         )
     
     def save_config(self):
@@ -81,7 +112,9 @@ class ConfigManager:
             config_data = {
                 'telegram': asdict(self.config.telegram),
                 'bot': asdict(self.config.bot),
-                'first_run': self.config.first_run
+                'first_run': self.config.first_run,
+                'storage': asdict(self.config.storage),
+                'webdav': asdict(self.config.webdav)
             }
             
             with open(self.config_file, 'w', encoding='utf-8') as f:
@@ -258,6 +291,24 @@ class ConfigManager:
             )
         
         self.console.print(table)
+        
+        # Дополнительно: Хранилище и WebDAV
+        storage = self.config.storage
+        webdav = self.config.webdav
+        table2 = Table(title="Хранилище и WebDAV", box=box.ROUNDED)
+        table2.add_column("Параметр", style="cyan")
+        table2.add_column("Значение", style="green")
+        table2.add_column("Статус", style="yellow")
+        table2.add_row("Путь списка каналов", storage.channels_path or ".channels", "—")
+        table2.add_row("WebDAV", "Включен" if webdav.enabled else "Отключен", "—")
+        if webdav.enabled:
+            table2.add_row("WebDAV URL", webdav.url or "—", "✓")
+            table2.add_row("Удаленный путь", webdav.remote_path or "—", "✓")
+            table2.add_row("Автосинхронизация", "Включена" if webdav.auto_sync else "Отключена", "—")
+            table2.add_row("Уведомления", "Включены" if webdav.notify_on_sync else "Отключены", "—")
+            table2.add_row("Загрузка архивов", "Включена" if webdav.upload_archives else "Отключена", "—")
+            table2.add_row("Каталог архивов", webdav.archives_remote_dir or "—", "—")
+        self.console.print(table2)
     
     def interactive_setup(self):
         """Интерактивная настройка конфигурации"""
@@ -273,23 +324,29 @@ class ConfigManager:
             self.console.print("\n[bold cyan]Доступные действия:[/bold cyan]")
             self.console.print("1. Настроить Telegram API")
             self.console.print("2. Настроить бота для уведомлений")
-            self.console.print("3. Показать текущую конфигурацию")
-            self.console.print("4. Сбросить конфигурацию")
-            self.console.print("5. Продолжить с текущими настройками")
+            self.console.print("3. Настроить путь хранения списка каналов")
+            self.console.print("4. Настроить WebDAV синхронизацию")
+            self.console.print("5. Показать текущую конфигурацию")
+            self.console.print("6. Сбросить конфигурацию")
+            self.console.print("7. Продолжить с текущими настройками")
             self.console.print("0. Выход")
             
-            choice = Prompt.ask("\nВыберите действие", choices=["0", "1", "2", "3", "4", "5"])
+            choice = Prompt.ask("\nВыберите действие", choices=["0", "1", "2", "3", "4", "5", "6", "7"])
             
             if choice == "1":
                 self.setup_telegram_config(force_setup=True)
             elif choice == "2":
                 self.setup_bot_config(force_setup=True)
             elif choice == "3":
-                input("\nНажмите Enter для продолжения...")
+                self.setup_storage_config(force_setup=True)
             elif choice == "4":
+                self.setup_webdav_config(force_setup=True)
+            elif choice == "5":
+                input("\nНажмите Enter для продолжения...")
+            elif choice == "6":
                 if Confirm.ask("Вы уверены, что хотите сбросить всю конфигурацию?"):
                     self.reset_config()
-            elif choice == "5":
+            elif choice == "7":
                 break
             elif choice == "0":
                 return False
@@ -305,13 +362,55 @@ class ConfigManager:
             self.config = AppConfig(
                 telegram=TelegramConfig(),
                 bot=BotConfig(),
-                first_run=True
+                first_run=True,
+                storage=StorageConfig(),
+                webdav=WebDavConfig()
             )
             
             self.console.print("[green]✓ Конфигурация сброшена[/green]")
             
         except Exception as e:
             self.console.print(f"[red]Ошибка сброса конфигурации: {e}[/red]")
+
+    def setup_storage_config(self, force_setup: bool = False):
+        """Настройка пути хранения списка каналов"""
+        storage = self.config.storage
+        self.console.print("\n[bold blue]Настройка хранилища каналов[/bold blue]")
+        default_path = storage.channels_path or ".channels"
+        new_path = Prompt.ask("Путь к локальному файлу со списком каналов", default=default_path)
+        self.config.storage.channels_path = new_path
+        self.save_config()
+        self.console.print(f"[green]✓ Путь сохранен: {new_path}[/green]")
+
+    def setup_webdav_config(self, force_setup: bool = False):
+        """Настройка WebDAV синхронизации"""
+        webdav = self.config.webdav
+        self.console.print("\n[bold blue]Настройка WebDAV[/bold blue]")
+        enabled = Confirm.ask("Включить синхронизацию WebDAV?", default=webdav.enabled)
+        if not enabled:
+            webdav.enabled = False
+            self.save_config()
+            self.console.print("[yellow]WebDAV синхронизация отключена[/yellow]")
+            return
+        base_url = Prompt.ask("Базовый URL WebDAV", default=webdav.url or "")
+        username = Prompt.ask("Имя пользователя", default=webdav.username or "")
+        password = Prompt.ask("Пароль", password=True, default=webdav.password or "")
+        remote_path = Prompt.ask("Удаленный путь к файлу (например /channels/.channels)", default=webdav.remote_path or "/channels/.channels")
+        auto_sync = Confirm.ask("Включить автосинхронизацию (загрузка/выгрузка .channels)?", default=webdav.auto_sync)
+        notify_on_sync = Confirm.ask("Отправлять уведомление в Telegram при успешной синхронизации?", default=webdav.notify_on_sync)
+        upload_archives = Confirm.ask("Разрешить выгрузку ZIP-архивов каналов на WebDAV?", default=webdav.upload_archives)
+        archives_remote_dir = Prompt.ask("Каталог на WebDAV для архивов", default=webdav.archives_remote_dir or "/channels/archives")
+        webdav.enabled = True
+        webdav.url = base_url
+        webdav.username = username
+        webdav.password = password
+        webdav.remote_path = remote_path
+        webdav.auto_sync = auto_sync
+        webdav.notify_on_sync = notify_on_sync
+        webdav.upload_archives = upload_archives
+        webdav.archives_remote_dir = archives_remote_dir
+        self.save_config()
+        self.console.print("[green]✓ Конфигурация WebDAV сохранена[/green]")
     
     def ensure_configured(self) -> bool:
         """Убедиться, что конфигурация настроена"""
