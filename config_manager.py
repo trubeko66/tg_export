@@ -59,8 +59,8 @@ class AppConfig:
     telegram: TelegramConfig
     bot: BotConfig
     first_run: bool = True
-    storage: StorageConfig = StorageConfig()
-    webdav: WebDavConfig = WebDavConfig()
+    storage: StorageConfig = field(default_factory=StorageConfig)
+    webdav: WebDavConfig = field(default_factory=WebDavConfig)
 
 
     
