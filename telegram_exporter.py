@@ -566,13 +566,45 @@ class TelegramExporter:
         channels_table.add_column("Канал", style="green")
         channels_table.add_column("Последняя проверка", style="blue")
         channels_table.add_column("Сообщений", style="yellow", justify="right")
+        channels_table.add_column("Объем файлов", style="cyan", justify="right")
         
         for channel in self.channels:
             last_check = channel.last_check or "Никогда"
+            
+            # Вычисляем объем файлов для канала
+            channel_size = 0.0
+            try:
+                storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
+                base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
+                base_path = Path(base_dir)
+                channel_dir = base_path / channel.title.replace('/', '_').replace('\\', '_')
+                
+                if channel_dir.exists() and channel_dir.is_dir():
+                    # Подсчитываем размер всех файлов в папке канала
+                    for file_path in channel_dir.rglob('*'):
+                        if file_path.is_file():
+                            try:
+                                channel_size += file_path.stat().st_size
+                            except (OSError, PermissionError):
+                                pass
+                    channel_size = channel_size / (1024 * 1024)  # Конвертируем в МБ
+            except Exception:
+                channel_size = 0.0
+            
+            # Форматируем размер файлов
+            if channel_size > 0:
+                if channel_size >= 1024:
+                    size_str = f"{channel_size/1024:.1f} ГБ"
+                else:
+                    size_str = f"{channel_size:.1f} МБ"
+            else:
+                size_str = "—"
+            
             channels_table.add_row(
                 channel.title[:30] + "..." if len(channel.title) > 30 else channel.title,
                 last_check,
-                str(channel.total_messages)
+                str(channel.total_messages),
+                size_str
             )
         
         layout["left"].update(Panel(channels_table))
