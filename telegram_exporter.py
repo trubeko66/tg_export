@@ -59,9 +59,10 @@ class ExportStats:
     total_channels: int = 0
     total_messages: int = 0
     total_size_mb: float = 0.0
-    last_export_time: Optional[str] = None
     export_errors: int = 0
     filtered_messages: int = 0
+    last_export_time: Optional[str] = None
+    current_export_info: Optional[str] = None  # Информация о текущем экспорте
 
 
 class TelegramExporter:
@@ -584,6 +585,11 @@ class TelegramExporter:
         stats_text.append(f"Отфильтровано: {self.stats.filtered_messages}\n", style="magenta")
         stats_text.append(f"Последний экспорт: {self.stats.last_export_time or 'Никогда'}\n", style="blue")
         
+        # Добавляем информацию о текущем экспорте
+        if self.stats.current_export_info:
+            stats_text.append(f"\n[bold green]Текущий экспорт:[/bold green]\n", style="bold green")
+            stats_text.append(f"{self.stats.current_export_info}\n", style="green")
+        
         layout["right"].update(Panel(stats_text, title="Статистика"))
         
         # Подвал с инструкциями
@@ -644,6 +650,9 @@ class TelegramExporter:
         try:
             self.logger.info(f"Starting export for channel: {channel.title}")
             
+            # Обновляем информацию о текущем экспорте
+            self.stats.current_export_info = f"Экспорт: {channel.title}"
+            
             # Создание директории для канала (учет базового каталога из настроек)
             try:
                 storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
@@ -675,6 +684,9 @@ class TelegramExporter:
             try:
                 async for message in self.client.iter_messages(entity, min_id=min_id):
                     try:
+                        # Обновляем прогресс экспорта
+                        self.stats.current_export_info = f"Экспорт: {channel.title} | Обработано: {len(messages_data)}"
+                        
                         # Фильтрация рекламных и промо-сообщений
                         should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
                         if should_filter:
@@ -752,6 +764,25 @@ class TelegramExporter:
                 html_file = html_exporter.export_messages(messages_data)
                 md_file = md_exporter.export_messages(messages_data)
                 
+                # Проверка создания файлов экспорта
+                export_files_created = []
+                if json_file and json_file.exists():
+                    export_files_created.append("JSON")
+                if html_file and html_file.exists():
+                    export_files_created.append("HTML")
+                if md_file and md_file.exists():
+                    export_files_created.append("Markdown")
+                
+                if not export_files_created:
+                    self.logger.error(f"Export files were not created for channel {channel.title}")
+                    self.stats.export_errors += 1
+                    # Отправляем уведомление об ошибке
+                    notification = self._create_notification(channel, 0, False, "Файлы экспорта не были созданы")
+                    await self.send_notification(notification)
+                    return
+                
+                self.logger.info(f"Export files created for {channel.title}: {', '.join(export_files_created)}")
+                
                 # Обновление статистики канала
                 channel.total_messages += len(messages_data)
                 channel.last_check = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -791,6 +822,9 @@ class TelegramExporter:
             # Отправка уведомления об ошибке
             notification = self._create_notification(channel, 0, False, str(e))
             await self.send_notification(notification)
+        finally:
+            # Очищаем информацию о текущем экспорте
+            self.stats.current_export_info = None
     
     def _create_notification(self, channel: ChannelInfo, messages_count: int, success: bool, error: str = None) -> str:
         """Создание текста уведомления"""
