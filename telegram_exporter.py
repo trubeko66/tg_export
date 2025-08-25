@@ -655,6 +655,45 @@ class TelegramExporter:
             schedule.run_pending()
             await asyncio.sleep(60)  # Проверка каждую минуту
     
+    def _calculate_channel_media_size(self, channel: ChannelInfo) -> float:
+        """Вычисление общего размера медиафайлов канала в МБ"""
+        try:
+            # Получаем путь к директории канала
+            export_base_dir = Path(self.config_manager.config.storage.export_base_dir or "exports")
+            channel_dir = export_base_dir / channel.title
+            media_dir = channel_dir / "media"
+            
+            if not media_dir.exists():
+                return 0.0
+            
+            total_size = 0
+            media_files = 0
+            
+            # Подсчитываем размер всех файлов в директории media
+            for file_path in media_dir.rglob("*"):
+                if file_path.is_file():
+                    try:
+                        file_size = file_path.stat().st_size
+                        if file_size > 0:  # Игнорируем файлы нулевого размера
+                            total_size += file_size
+                            media_files += 1
+                    except (OSError, IOError):
+                        # Пропускаем файлы, к которым нет доступа
+                        continue
+            
+            # Конвертируем в мегабайты
+            size_mb = total_size / (1024 * 1024)
+            
+            # Логируем только если есть файлы
+            if media_files > 0:
+                self.logger.debug(f"Channel {channel.title}: {media_files} media files, {size_mb:.2f} MB total")
+            
+            return size_mb
+            
+        except Exception as e:
+            self.logger.warning(f"Error calculating media size for channel {channel.title}: {e}")
+            return 0.0
+    
     async def export_all_channels(self):
         """Экспорт всех каналов"""
         self.logger.info("Starting scheduled export of all channels")
