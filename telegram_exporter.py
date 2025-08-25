@@ -51,6 +51,7 @@ class ChannelInfo:
     last_message_id: int = 0
     total_messages: int = 0
     last_check: Optional[str] = None
+    media_size_mb: float = 0.0  # Кэшированный размер медиафайлов в МБ
 
 
 @dataclass
@@ -571,32 +572,21 @@ class TelegramExporter:
         for channel in self.channels:
             last_check = channel.last_check or "Никогда"
             
-            # Вычисляем объем файлов для канала
-            channel_size = 0.0
-            try:
-                storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
-                base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
-                base_path = Path(base_dir)
-                channel_dir = base_path / channel.title.replace('/', '_').replace('\\', '_')
-                
-                if channel_dir.exists() and channel_dir.is_dir():
-                    # Подсчитываем размер всех файлов в папке канала
-                    for file_path in channel_dir.rglob('*'):
-                        if file_path.is_file():
-                            try:
-                                channel_size += file_path.stat().st_size
-                            except (OSError, PermissionError):
-                                pass
-                    channel_size = channel_size / (1024 * 1024)  # Конвертируем в МБ
-            except Exception:
-                channel_size = 0.0
+            # Вычисляем объем скачанных медиафайлов для канала
+            channel_size = self._calculate_channel_media_size(channel)
             
-            # Форматируем размер файлов
+            # Форматируем размер файлов с улучшенной точностью
             if channel_size > 0:
                 if channel_size >= 1024:
-                    size_str = f"{channel_size/1024:.1f} ГБ"
-                else:
+                    # Гигабайты
+                    size_str = f"{channel_size/1024:.2f} ГБ"
+                elif channel_size >= 1:
+                    # Мегабайты
                     size_str = f"{channel_size:.1f} МБ"
+                else:
+                    # Килобайты для небольших размеров
+                    size_kb = channel_size * 1024
+                    size_str = f"{size_kb:.0f} КБ"
             else:
                 size_str = "—"
             
