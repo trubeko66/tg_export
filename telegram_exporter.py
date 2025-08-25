@@ -816,9 +816,14 @@ class TelegramExporter:
                     self.stats.download_speed_files_per_sec = float(progress.get('files_per_sec', 0.0))
                     self.stats.download_speed_mb_per_sec = float(progress.get('mb_per_sec', 0.0))
                     self.stats.remaining_files_to_download = int(progress.get('remaining', 0))
-                    # Обновим информационную строку
-                    if self.stats.current_export_info:
-                        self.stats.current_export_info += f" | Осталось файлов: {self.stats.remaining_files_to_download}"
+                    # Обновляем информационную строку без накопления, чтобы она перерисовывалась
+                    total_files_planned = int(progress.get('total', 0))
+                    completed = int(progress.get('completed', 0))
+                    self.stats.current_export_info = (
+                        f"Интеллектуальная загрузка: {channel.title} | "
+                        f"Осталось: {self.stats.remaining_files_to_download} из {total_files_planned} | "
+                        f"Скорость: {self.stats.download_speed_files_per_sec:.1f} ф/с, {self.stats.download_speed_mb_per_sec:.1f} МБ/с"
+                    )
                 except Exception:
                     pass
             media_downloader.progress_callback = _on_progress
