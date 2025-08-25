@@ -698,7 +698,15 @@ class TelegramExporter:
             json_exporter = JSONExporter(channel.title, channel_dir)
             html_exporter = HTMLExporter(channel.title, channel_dir)
             md_exporter = MarkdownExporter(channel.title, channel_dir)
-            media_downloader = MediaDownloader(channel_dir)
+            
+            # Получаем количество потоков для загрузки медиа из конфигурации
+            try:
+                storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
+                media_threads = getattr(storage_cfg, 'media_download_threads', 4) or 4
+            except Exception:
+                media_threads = 4
+            
+            media_downloader = MediaDownloader(channel_dir, max_workers=media_threads)
 
             # Получение сообщений
             messages_data = []
@@ -736,11 +744,9 @@ class TelegramExporter:
                             media_type = None
                             
                             if message.media:
-                                media_path = await media_downloader.download_media(self.client, message)
-                                if media_path:
-                                    file_size = media_downloader.get_file_size_mb(channel_dir / media_path)
-                                    total_size += file_size
-                                    
+                                # Добавляем в очередь загрузки вместо немедленной загрузки
+                                media_path = media_downloader.add_to_download_queue(self.client, message)
+                                
                                 # Определение типа медиа
                                 if isinstance(message.media, MessageMediaPhoto):
                                     media_type = "Фото"
@@ -800,11 +806,9 @@ class TelegramExporter:
                             media_type = None
                             
                             if message.media:
-                                media_path = await media_downloader.download_media(self.client, message)
-                                if media_path:
-                                    file_size = media_downloader.get_file_size_mb(channel_dir / media_path)
-                                    total_size += file_size
-                                    
+                                # Добавляем в очередь загрузки вместо немедленной загрузки
+                                media_path = media_downloader.add_to_download_queue(self.client, message)
+                                
                                 # Определение типа медиа
                                 if isinstance(message.media, MessageMediaPhoto):
                                     media_type = "Фото"
@@ -862,6 +866,37 @@ class TelegramExporter:
             if messages_data:
                 # Сортировка сообщений по дате (старые сначала)
                 messages_data.sort(key=lambda x: x.date or datetime.min)
+                
+                # Параллельная загрузка всех медиафайлов
+                if media_downloader.get_queue_size() > 0:
+                    self.logger.info(f"Starting parallel download of {media_downloader.get_queue_size()} media files using {media_downloader.max_workers} threads")
+                    self.stats.current_export_info = f"Загрузка медиа: {channel.title} | {media_downloader.get_queue_size()} файлов | {media_downloader.max_workers} потоков"
+                    
+                    try:
+                        downloaded_files = await media_downloader.download_queue_parallel()
+                        self.logger.info(f"Successfully downloaded {len(downloaded_files)} media files")
+                        
+                        # Обновляем пути к медиафайлам в данных сообщений
+                        for msg_data in messages_data:
+                            if msg_data.media_path and msg_data.media_path.startswith("media/"):
+                                # Проверяем, был ли файл успешно загружен
+                                actual_path = media_downloader.get_downloaded_file(msg_data.id)
+                                if actual_path:
+                                    msg_data.media_path = actual_path
+                                    # Подсчитываем размер файла
+                                    file_size = media_downloader.get_file_size_mb(channel_dir / actual_path)
+                                    total_size += file_size
+                                else:
+                                    # Файл не был загружен, убираем ссылку
+                                    msg_data.media_path = None
+                                    msg_data.media_type = None
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error during parallel media download: {e}")
+                        # Продолжаем без медиафайлов
+                        for msg_data in messages_data:
+                            msg_data.media_path = None
+                            msg_data.media_type = None
                 
                 # Экспорт в различные форматы
                 self.logger.info(f"Exporting {len(messages_data)} new messages to existing files (incremental mode)")

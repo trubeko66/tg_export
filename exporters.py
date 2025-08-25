@@ -7,6 +7,8 @@
 import json
 import html
 import re
+import asyncio
+import concurrent.futures
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -502,15 +504,18 @@ class MarkdownExporter(BaseExporter):
 
 
 class MediaDownloader:
-    """Класс для загрузки медиафайлов"""
+    """Класс для загрузки медиафайлов с поддержкой многопоточности"""
     
-    def __init__(self, output_dir: Path):
+    def __init__(self, output_dir: Path, max_workers: int = 4):
         self.output_dir = output_dir
         self.media_dir = output_dir / "media"
         self.media_dir.mkdir(exist_ok=True)
+        self.max_workers = max_workers
+        self.download_queue = []
+        self.downloaded_files = {}
     
     async def download_media(self, client, message: Message) -> Optional[str]:
-        """Загрузка медиафайла из сообщения"""
+        """Загрузка медиафайла из сообщения (синхронная версия для совместимости)"""
         if not message.media:
             return None
         
@@ -545,6 +550,104 @@ class MediaDownloader:
             print(f"Ошибка загрузки медиа для сообщения {message.id}: {e}")
             return None
     
+    def add_to_download_queue(self, client, message: Message) -> str:
+        """Добавление сообщения в очередь загрузки"""
+        if not message.media:
+            return ""
+        
+        try:
+            # Определение типа медиа и расширения файла
+            if isinstance(message.media, MessageMediaPhoto):
+                extension = ".jpg"
+                media_type = "photo"
+            elif isinstance(message.media, MessageMediaDocument):
+                extension = ".bin"
+                media_type = "document"
+                
+                if hasattr(message.media.document, 'attributes'):
+                    for attr in message.media.document.attributes:
+                        if hasattr(attr, 'file_name') and attr.file_name:
+                            extension = Path(attr.file_name).suffix or ".bin"
+                            break
+            else:
+                return ""
+            
+            # Генерация имени файла
+            filename = f"msg_{message.id}_{media_type}{extension}"
+            file_path = self.media_dir / filename
+            
+            # Добавляем в очередь загрузки
+            self.download_queue.append({
+                'client': client,
+                'message': message,
+                'file_path': file_path,
+                'filename': filename,
+                'media_type': media_type
+            })
+            
+            return f"media/{filename}"
+            
+        except Exception as e:
+            print(f"Ошибка добавления в очередь загрузки для сообщения {message.id}: {e}")
+            return ""
+    
+    async def download_queue_parallel(self) -> Dict[int, str]:
+        """Параллельная загрузка всех файлов из очереди"""
+        if not self.download_queue:
+            return {}
+        
+        results = {}
+        
+        # Создаем пул потоков для загрузки
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Создаем задачи для загрузки
+            future_to_item = {}
+            
+            for item in self.download_queue:
+                future = executor.submit(self._download_single_file, item)
+                future_to_item[future] = item
+            
+            # Ожидаем завершения всех загрузок
+            for future in concurrent.futures.as_completed(future_to_item):
+                item = future_to_item[future]
+                try:
+                    success = future.result()
+                    if success:
+                        results[item['message'].id] = f"media/{item['filename']}"
+                        self.downloaded_files[item['message'].id] = f"media/{item['filename']}"
+                except Exception as e:
+                    print(f"Ошибка загрузки файла для сообщения {item['message'].id}: {e}")
+        
+        # Очищаем очередь
+        self.download_queue.clear()
+        
+        return results
+    
+    def _download_single_file(self, item: Dict) -> bool:
+        """Загрузка одного файла (выполняется в отдельном потоке)"""
+        try:
+            client = item['client']
+            message = item['message']
+            file_path = item['file_path']
+            
+            # Синхронная загрузка файла
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                loop.run_until_complete(client.download_media(message, file_path))
+                return file_path.exists()
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            print(f"Ошибка загрузки файла {item['filename']}: {e}")
+            return False
+    
+    def get_downloaded_file(self, message_id: int) -> Optional[str]:
+        """Получение пути к загруженному файлу"""
+        return self.downloaded_files.get(message_id)
+    
     def get_file_size_mb(self, file_path: str) -> float:
         """Получение размера файла в МБ"""
         try:
@@ -552,3 +655,12 @@ class MediaDownloader:
             return size_bytes / (1024 * 1024)
         except:
             return 0.0
+    
+    def get_queue_size(self) -> int:
+        """Получение размера очереди загрузки"""
+        return len(self.download_queue)
+    
+    def clear_queue(self):
+        """Очистка очереди загрузки"""
+        self.download_queue.clear()
+        self.downloaded_files.clear()

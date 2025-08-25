@@ -35,9 +35,10 @@ class BotConfig:
 
 @dataclass
 class StorageConfig:
-    """Конфигурация локального хранилища"""
+    """Конфигурация хранилища"""
     channels_path: Optional[str] = ".channels"
     export_base_dir: Optional[str] = "exports"
+    media_download_threads: int = 4  # Количество потоков для загрузки медиафайлов
 
 
 @dataclass
@@ -291,6 +292,13 @@ class ConfigManager:
                 "✓ Настроено" if self.config.bot.chat_id else "✗ Не настроено"
             )
         
+        # Storage config
+        if self.config.storage:
+            self.console.print("\n[bold blue]Хранилище:[/bold blue]")
+            self.console.print(f"  Путь к списку каналов: {self.config.storage.channels_path}")
+            self.console.print(f"  Каталог экспорта: {self.config.storage.export_base_dir}")
+            self.console.print(f"  Потоки загрузки медиа: {self.config.storage.media_download_threads}")
+        
         self.console.print(table)
         
         # Дополнительно: Хранилище и WebDAV
@@ -374,17 +382,47 @@ class ConfigManager:
             self.console.print(f"[red]Ошибка сброса конфигурации: {e}[/red]")
 
     def setup_storage_config(self, force_setup: bool = False):
-        """Настройка пути хранения списка каналов"""
-        storage = self.config.storage
-        self.console.print("\n[bold blue]Настройка хранилища каналов[/bold blue]")
-        default_path = storage.channels_path or ".channels"
-        new_path = Prompt.ask("Путь к локальному файлу со списком каналов", default=default_path)
-        export_dir_default = storage.export_base_dir or "exports"
-        export_dir = Prompt.ask("Каталог для сохранения экспортируемых каналов", default=export_dir_default)
-        self.config.storage.channels_path = new_path
-        self.config.storage.export_base_dir = export_dir
+        """Интерактивная настройка конфигурации хранилища"""
+        if not force_setup and self.config.storage.channels_path and self.config.storage.export_base_dir:
+            if not Confirm.ask("Настройки хранилища уже заданы. Изменить их?"):
+                return True
+        
+        self.console.print("\n[bold blue]Настройка хранилища[/bold blue]")
+        
+        # Путь для файла списка каналов
+        channels_path = Prompt.ask(
+            "Путь для сохранения списка каналов",
+            default=self.config.storage.channels_path or ".channels"
+        )
+        
+        # Базовый каталог для экспорта
+        export_base_dir = Prompt.ask(
+            "Базовый каталог для экспорта каналов",
+            default=self.config.storage.export_base_dir or "exports"
+        )
+        
+        # Количество потоков для загрузки медиа
+        media_threads = Prompt.ask(
+            "Количество потоков для загрузки медиафайлов (1-16)",
+            default=str(self.config.storage.media_download_threads or 4)
+        )
+        
+        try:
+            media_threads_int = int(media_threads)
+            if media_threads_int < 1 or media_threads_int > 16:
+                self.console.print("[yellow]Количество потоков должно быть от 1 до 16. Установлено значение 4.[/yellow]")
+                media_threads_int = 4
+        except ValueError:
+            self.console.print("[yellow]Неверное значение. Установлено количество потоков 4.[/yellow]")
+            media_threads_int = 4
+        
+        self.config.storage.channels_path = channels_path
+        self.config.storage.export_base_dir = export_base_dir
+        self.config.storage.media_download_threads = media_threads_int
+        
         self.save_config()
-        self.console.print(f"[green]✓ Пути сохранены: channels={new_path}, export_dir={export_dir}[/green]")
+        self.console.print("[green]✓ Настройки хранилища сохранены[/green]")
+        return True
 
     def setup_webdav_config(self, force_setup: bool = False):
         """Настройка WebDAV синхронизации"""
