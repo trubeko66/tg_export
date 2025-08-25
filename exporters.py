@@ -93,12 +93,15 @@ class JSONExporter(BaseExporter):
                 with open(output_file, 'r', encoding='utf-8') as f:
                     existing_data = json.load(f)
                     existing_messages = existing_data.get("messages", [])
-            except Exception:
+                    print(f"JSON: Found {len(existing_messages)} existing messages in {output_file}")
+            except Exception as e:
                 # Если файл поврежден, начинаем заново
+                print(f"JSON: Error reading existing file {output_file}: {e}")
                 existing_messages = []
         
         # Объединяем существующие и новые сообщения
         all_messages = existing_messages + self._messages_to_dict(messages)
+        print(f"JSON: Merged {len(existing_messages)} existing + {len(messages)} new = {len(all_messages)} total")
         
         # Убираем дубликаты по ID сообщения
         seen_ids = set()
@@ -107,6 +110,8 @@ class JSONExporter(BaseExporter):
             if msg["id"] not in seen_ids:
                 seen_ids.add(msg["id"])
                 unique_messages.append(msg)
+        
+        print(f"JSON: After deduplication: {len(unique_messages)} unique messages")
         
         # Сортируем по ID сообщения (старые сначала)
         unique_messages.sort(key=lambda x: x["id"])
@@ -162,12 +167,15 @@ class HTMLExporter(BaseExporter):
                 with open(output_file, 'r', encoding='utf-8') as f:
                     content = f.read()
                     existing_messages = self._extract_messages_from_html(content)
-            except Exception:
+                    print(f"HTML: Found {len(existing_messages)} existing messages in {output_file}")
+            except Exception as e:
                 # Если файл поврежден, начинаем заново
+                print(f"HTML: Error reading existing file {output_file}: {e}")
                 existing_messages = []
         
         # Объединяем существующие и новые сообщения
         all_messages = existing_messages + messages
+        print(f"HTML: Merged {len(existing_messages)} existing + {len(messages)} new = {len(all_messages)} total")
         
         # Убираем дубликаты по ID сообщения
         seen_ids = set()
@@ -176,6 +184,8 @@ class HTMLExporter(BaseExporter):
             if msg.id not in seen_ids:
                 seen_ids.add(msg.id)
                 unique_messages.append(msg)
+        
+        print(f"HTML: After deduplication: {len(unique_messages)} unique messages")
         
         # Сортируем по ID сообщения (старые сначала)
         unique_messages.sort(key=lambda x: x.id)
@@ -189,10 +199,69 @@ class HTMLExporter(BaseExporter):
     
     def _extract_messages_from_html(self, html_content: str) -> List[MessageData]:
         """Извлечение сообщений из существующего HTML файла"""
-        # Простая реализация - в реальности может потребоваться более сложный парсинг
-        # Пока возвращаем пустой список, так как парсинг HTML сложен
-        # В будущем можно улучшить этот метод
-        return []
+        try:
+            import re
+            from datetime import datetime
+            
+            messages = []
+            # Ищем блоки сообщений в HTML
+            message_pattern = r'<div class="message"[^>]*>.*?<div class="message-header">.*?<span class="message-id">#(\d+)</span>.*?<span class="message-date">([^<]+)</span>.*?</div>.*?<div class="message-text">(.*?)</div>.*?</div>'
+            
+            matches = re.findall(message_pattern, html_content, re.DOTALL)
+            
+            for msg_id, date_str, text in matches:
+                try:
+                    # Парсим ID сообщения
+                    message_id = int(msg_id)
+                    
+                    # Парсим дату (пробуем несколько форматов)
+                    parsed_date = None
+                    date_formats = [
+                        '%Y-%m-%d %H:%M:%S',
+                        '%Y-%m-%d %H:%M',
+                        '%d.%m.%Y %H:%M:%S',
+                        '%d.%m.%Y %H:%M'
+                    ]
+                    
+                    for fmt in date_formats:
+                        try:
+                            parsed_date = datetime.strptime(date_str.strip(), fmt)
+                            break
+                        except ValueError:
+                            continue
+                    
+                    if not parsed_date:
+                        # Если не удалось распарсить, используем текущую дату
+                        parsed_date = datetime.now()
+                    
+                    # Очищаем HTML теги из текста
+                    clean_text = re.sub(r'<[^>]+>', '', text).strip()
+                    
+                    # Создаем объект MessageData
+                    msg_data = MessageData(
+                        id=message_id,
+                        date=parsed_date,
+                        text=clean_text,
+                        author=None,
+                        media_type=None,
+                        media_path=None,
+                        views=0,
+                        forwards=0,
+                        replies=0,
+                        edited=None
+                    )
+                    
+                    messages.append(msg_data)
+                    
+                except (ValueError, TypeError) as e:
+                    # Пропускаем сообщения с ошибками парсинга
+                    continue
+            
+            return messages
+            
+        except Exception as e:
+            # В случае ошибки возвращаем пустой список
+            return []
     
     def _generate_html(self, messages: List[MessageData]) -> str:
         """Генерация HTML контента"""
@@ -347,12 +416,15 @@ class MarkdownExporter(BaseExporter):
                 with open(output_file, 'r', encoding='utf-8') as f:
                     content = f.read()
                     existing_messages = self._extract_messages_from_markdown(content)
-            except Exception:
+                    print(f"Markdown: Found {len(existing_messages)} existing messages in {output_file}")
+            except Exception as e:
                 # Если файл поврежден, начинаем заново
+                print(f"Markdown: Error reading existing file {output_file}: {e}")
                 existing_messages = []
         
         # Объединяем существующие и новые сообщения
         all_messages = existing_messages + messages
+        print(f"Markdown: Merged {len(existing_messages)} existing + {len(messages)} new = {len(all_messages)} total")
         
         # Убираем дубликаты по ID сообщения
         seen_ids = set()
@@ -361,6 +433,8 @@ class MarkdownExporter(BaseExporter):
             if msg.id not in seen_ids:
                 seen_ids.add(msg.id)
                 unique_messages.append(msg)
+        
+        print(f"Markdown: After deduplication: {len(unique_messages)} unique messages")
         
         # Сортируем по ID сообщения (старые сначала)
         unique_messages.sort(key=lambda x: x.id)
@@ -374,10 +448,85 @@ class MarkdownExporter(BaseExporter):
     
     def _extract_messages_from_markdown(self, md_content: str) -> List[MessageData]:
         """Извлечение сообщений из существующего Markdown файла"""
-        # Простая реализация - в реальности может потребоваться более сложный парсинг
-        # Пока возвращаем пустой список, так как парсинг Markdown сложен
-        # В будущем можно улучшить этот метод
-        return []
+        try:
+            import re
+            from datetime import datetime
+            
+            messages = []
+            # Ищем блоки сообщений в Markdown
+            message_pattern = r'## Сообщение #(\d+)\n\n\*\*Дата:\*\* ([^\n]+).*?\n\n(.*?)(?=\n## Сообщение #|\n---\n|$)'
+            
+            matches = re.findall(message_pattern, md_content, re.DOTALL)
+            
+            for msg_id, date_str, content in matches:
+                try:
+                    # Парсим ID сообщения
+                    message_id = int(msg_id)
+                    
+                    # Парсим дату (пробуем несколько форматов)
+                    parsed_date = None
+                    date_formats = [
+                        '%Y-%m-%d %H:%M:%S',
+                        '%Y-%m-%d %H:%M',
+                        '%d.%m.%Y %H:%M:%S',
+                        '%d.%m.%Y %H:%M'
+                    ]
+                    
+                    for fmt in date_formats:
+                        try:
+                            parsed_date = datetime.strptime(date_str.strip(), fmt)
+                            break
+                        except ValueError:
+                            continue
+                    
+                    if not parsed_date:
+                        # Если не удалось распарсить, используем текущую дату
+                        parsed_date = datetime.now()
+                    
+                    # Извлекаем текст сообщения (убираем статистику и другую информацию)
+                    lines = content.split('\n')
+                    text_lines = []
+                    
+                    for line in lines:
+                        line = line.strip()
+                        # Пропускаем строки с метаданными
+                        if (line.startswith('**') or 
+                            line.startswith('👁') or 
+                            line.startswith('🔄') or 
+                            line.startswith('💬') or
+                            line.startswith('*Отредактировано:') or
+                            line.startswith('---')):
+                            continue
+                        if line:  # Добавляем только непустые строки
+                            text_lines.append(line)
+                    
+                    clean_text = '\n'.join(text_lines).strip()
+                    
+                    # Создаем объект MessageData
+                    msg_data = MessageData(
+                        id=message_id,
+                        date=parsed_date,
+                        text=clean_text,
+                        author=None,
+                        media_type=None,
+                        media_path=None,
+                        views=0,
+                        forwards=0,
+                        replies=0,
+                        edited=None
+                    )
+                    
+                    messages.append(msg_data)
+                    
+                except (ValueError, TypeError) as e:
+                    # Пропускаем сообщения с ошибками парсинга
+                    continue
+            
+            return messages
+            
+        except Exception as e:
+            # В случае ошибки возвращаем пустой список
+            return []
     
     def _generate_markdown(self, messages: List[MessageData]) -> str:
         """Генерация Markdown контента"""

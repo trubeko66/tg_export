@@ -906,11 +906,11 @@ class TelegramExporter:
                 
                 # Проверка создания файлов экспорта
                 export_files_created = []
-                if json_file and json_file.exists():
+                if json_file and Path(json_file).exists():
                     export_files_created.append("JSON")
-                if html_file and html_file.exists():
+                if html_file and Path(html_file).exists():
                     export_files_created.append("HTML")
-                if md_file and md_file.exists():
+                if md_file and Path(md_file).exists():
                     export_files_created.append("Markdown")
                 
                 if not export_files_created:
