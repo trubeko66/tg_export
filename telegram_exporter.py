@@ -63,6 +63,7 @@ class ExportStats:
     filtered_messages: int = 0
     last_export_time: Optional[str] = None
     current_export_info: Optional[str] = None  # Информация о текущем экспорте
+    total_messages_in_channel: int = 0  # Общее количество сообщений в текущем канале
 
 
 class TelegramExporter:
@@ -587,7 +588,7 @@ class TelegramExporter:
         
         # Добавляем информацию о текущем экспорте
         if self.stats.current_export_info:
-            stats_text.append(f"\n[bold green]Текущий экспорт:[/bold green]\n", style="bold green")
+            stats_text.append(f"\nТекущий экспорт:\n", style="green")
             stats_text.append(f"{self.stats.current_export_info}\n", style="green")
         
         layout["right"].update(Panel(stats_text, title="Статистика"))
@@ -667,6 +668,17 @@ class TelegramExporter:
             # Получение канала
             entity = await self.client.get_entity(channel.id)
             
+            # Сначала подсчитываем общее количество сообщений в канале
+            total_messages_in_channel = 0
+            try:
+                async for _ in self.client.iter_messages(entity):
+                    total_messages_in_channel += 1
+            except Exception as e:
+                self.logger.warning(f"Could not count total messages in {channel.title}: {e}")
+                total_messages_in_channel = 0
+            
+            self.stats.total_messages_in_channel = total_messages_in_channel
+            
             # Инициализация экспортеров
             json_exporter = JSONExporter(channel.title, channel_dir)
             html_exporter = HTMLExporter(channel.title, channel_dir)
@@ -685,7 +697,7 @@ class TelegramExporter:
                 async for message in self.client.iter_messages(entity, min_id=min_id):
                     try:
                         # Обновляем прогресс экспорта
-                        self.stats.current_export_info = f"Экспорт: {channel.title} | Обработано: {len(messages_data)}"
+                        self.stats.current_export_info = f"Экспорт: {channel.title} | Обработано {len(messages_data)} из {total_messages_in_channel}"
                         
                         # Фильтрация рекламных и промо-сообщений
                         should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
@@ -811,6 +823,12 @@ class TelegramExporter:
             else:
                 self.logger.info(f"No new messages found in {channel.title}")
                 channel.last_check = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Если экспорт прошел без сообщений, но в канале есть сообщения - повторная проверка
+                if total_messages_in_channel > 0:
+                    self.logger.info(f"Re-checking channel {channel.title} - found {total_messages_in_channel} total messages")
+                    self.stats.current_export_info = f"Повторная проверка: {channel.title} | Всего сообщений: {total_messages_in_channel}"
+                    # Здесь можно добавить дополнительную логику повторной проверки если нужно
             
             # Сохранение обновленной информации о каналах
             self.save_channels()
@@ -825,6 +843,7 @@ class TelegramExporter:
         finally:
             # Очищаем информацию о текущем экспорте
             self.stats.current_export_info = None
+            self.stats.total_messages_in_channel = 0
     
     def _create_notification(self, channel: ChannelInfo, messages_count: int, success: bool, error: str = None) -> str:
         """Создание текста уведомления"""
