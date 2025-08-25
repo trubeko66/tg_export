@@ -656,7 +656,18 @@ class TelegramExporter:
             await asyncio.sleep(60)  # Проверка каждую минуту
     
     def _calculate_channel_media_size(self, channel: ChannelInfo) -> float:
-        """Вычисление общего размера медиафайлов канала в МБ"""
+        """Вычисление общего размера медиафайлов канала в МБ с кешированием"""
+        # Кеширование для избежания повторных вычислений
+        cache_key = f"media_size_{channel.title}"
+        if hasattr(self, '_media_size_cache') and cache_key in self._media_size_cache:
+            cache_time, cached_size = self._media_size_cache[cache_key]
+            # Кеш действителен 5 минут
+            if time.time() - cache_time < 300:
+                return cached_size
+        
+        if not hasattr(self, '_media_size_cache'):
+            self._media_size_cache = {}
+        
         try:
             # Получаем путь к директории канала
             export_base_dir = Path(self.config_manager.config.storage.export_base_dir or "exports")
@@ -664,29 +675,45 @@ class TelegramExporter:
             media_dir = channel_dir / "media"
             
             if not media_dir.exists():
-                return 0.0
+                size_mb = 0.0
+            else:
+                total_size = 0
+                media_files = 0
+                
+                # Оптимизированный подсчет с использованием iterdir для лучшей производительности
+                try:
+                    for file_path in media_dir.iterdir():
+                        if file_path.is_file():
+                            try:
+                                file_size = file_path.stat().st_size
+                                if file_size > 0:  # Игнорируем файлы нулевого размера
+                                    total_size += file_size
+                                    media_files += 1
+                            except (OSError, IOError, PermissionError):
+                                # Пропускаем файлы, к которым нет доступа
+                                continue
+                except (OSError, IOError, PermissionError):
+                    # Если нет доступа к директории
+                    total_size = 0
+                    media_files = 0
+                
+                # Конвертируем в мегабайты
+                size_mb = total_size / (1024 * 1024)
+                
+                # Логируем только если есть файлы и включен debug режим
+                if media_files > 0 and self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(f"Channel {channel.title}: {media_files} media files, {size_mb:.2f} MB total")
             
-            total_size = 0
-            media_files = 0
+            # Кешируем результат
+            self._media_size_cache[cache_key] = (time.time(), size_mb)
             
-            # Подсчитываем размер всех файлов в директории media
-            for file_path in media_dir.rglob("*"):
-                if file_path.is_file():
-                    try:
-                        file_size = file_path.stat().st_size
-                        if file_size > 0:  # Игнорируем файлы нулевого размера
-                            total_size += file_size
-                            media_files += 1
-                    except (OSError, IOError):
-                        # Пропускаем файлы, к которым нет доступа
-                        continue
-            
-            # Конвертируем в мегабайты
-            size_mb = total_size / (1024 * 1024)
-            
-            # Логируем только если есть файлы
-            if media_files > 0:
-                self.logger.debug(f"Channel {channel.title}: {media_files} media files, {size_mb:.2f} MB total")
+            # Ограничиваем размер кеша
+            if len(self._media_size_cache) > 100:
+                # Удаляем самые старые записи
+                oldest_keys = sorted(self._media_size_cache.keys(), 
+                                   key=lambda k: self._media_size_cache[k][0])[:50]
+                for key in oldest_keys:
+                    del self._media_size_cache[key]
             
             return size_mb
             

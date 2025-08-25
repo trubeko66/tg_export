@@ -659,55 +659,88 @@ class MediaDownloader:
     """Класс для загрузки медиафайлов с интеллектуальной системой управления нагрузкой"""
     
     def __init__(self, output_dir: Path, max_workers: int = 4):
+        # Валидация параметров
+        if not isinstance(output_dir, Path):
+            raise TypeError("output_dir must be a Path object")
+        if not isinstance(max_workers, int) or max_workers < 1 or max_workers > 32:
+            raise ValueError("max_workers must be an integer between 1 and 32")
+        
         self.output_dir = output_dir
         self.media_dir = output_dir / "media"
-        self.media_dir.mkdir(exist_ok=True)
         
-        # Динамическое управление потоками
-        self.max_workers = max_workers
-        self.current_workers = min(2, max_workers)  # Начинаем с меньшего количества
+        # Создаем директорию с проверкой прав
+        try:
+            self.media_dir.mkdir(exist_ok=True, parents=True)
+        except (OSError, PermissionError) as e:
+            raise RuntimeError(f"Cannot create media directory {self.media_dir}: {e}")
+        
+        # Динамическое управление потоками с ограничениями
+        self.max_workers = min(max_workers, 16)  # Ограничиваем максимум 16 потоков
+        self.current_workers = min(2, self.max_workers)  # Начинаем с меньшего количества
         self.download_queue = []
         self.downloaded_files = {}
         
-        # Система управления нагрузкой
+        # Система управления нагрузкой с улучшенными параметрами
         self.flood_wait_count = 0
         self.last_flood_wait = 0
         self.success_count = 0
+        self.consecutive_successes = 0  # Подряд идущие успешные загрузки
         self.adaptive_delay = 0.5  # Начальная задержка между запросами
         self.min_delay = 0.1
-        self.max_delay = 3.0
+        self.max_delay = 5.0  # Увеличили максимальную задержку
         
         # Статистика для адаптации
         self.download_stats = {
             'total_attempts': 0,
             'successful_downloads': 0,
             'flood_waits': 0,
-            'average_speed': 0.0
+            'average_speed': 0.0,
+            'session_start_time': time.time()
         }
     
     def _adapt_to_flood_wait(self, flood_wait_seconds: int):
-        """Адаптация к flood wait"""
+        """Адаптация к flood wait с улучшенной логикой"""
         self.flood_wait_count += 1
         self.last_flood_wait = time.time()
         self.download_stats['flood_waits'] += 1
+        self.consecutive_successes = 0  # Сбрасываем счетчик успешных загрузок
+        
+        # Более агрессивное увеличение задержки для длительных flood wait
+        if flood_wait_seconds > 10:
+            multiplier = 2.0
+        elif flood_wait_seconds > 5:
+            multiplier = 1.8
+        else:
+            multiplier = 1.5
         
         # Увеличиваем задержку и уменьшаем количество потоков
-        self.adaptive_delay = min(self.max_delay, self.adaptive_delay * 1.5)
+        self.adaptive_delay = min(self.max_delay, self.adaptive_delay * multiplier)
         self.current_workers = max(1, self.current_workers - 1)
         
         print(f"🚫 Flood wait {flood_wait_seconds}s - адаптация: задержка {self.adaptive_delay:.1f}s, потоков {self.current_workers}")
     
     def _adapt_to_success(self):
-        """Адаптация к успешным загрузкам"""
+        """Адаптация к успешным загрузкам с улучшенной логикой"""
         self.success_count += 1
+        self.consecutive_successes += 1
         self.download_stats['successful_downloads'] += 1
         
-        # Если нет flood wait'ов некоторое время, можно ускориться
-        if time.time() - self.last_flood_wait > 60:  # 1 минута без flood wait
-            if self.success_count % 10 == 0:  # Каждые 10 успешных загрузок
-                self.adaptive_delay = max(self.min_delay, self.adaptive_delay * 0.9)
+        # Более консервативное ускорение
+        time_since_flood = time.time() - self.last_flood_wait
+        
+        # Ускоряемся только если давно не было flood wait и есть подряд идущие успехи
+        if time_since_flood > 120 and self.consecutive_successes >= 15:  # 2 минуты без flood wait и 15 успехов подряд
+            old_delay = self.adaptive_delay
+            old_workers = self.current_workers
+            
+            # Постепенное ускорение
+            self.adaptive_delay = max(self.min_delay, self.adaptive_delay * 0.95)
+            if self.consecutive_successes % 20 == 0:  # Каждые 20 успешных загрузок
                 self.current_workers = min(self.max_workers, self.current_workers + 1)
-                print(f"⚡ Ускорение: задержка {self.adaptive_delay:.1f}s, потоков {self.current_workers}")
+            
+            # Логируем только если были изменения
+            if old_delay != self.adaptive_delay or old_workers != self.current_workers:
+                print(f"⚡ Постепенное ускорение: задержка {self.adaptive_delay:.1f}s, потоков {self.current_workers}")
     
     def _get_smart_delay(self) -> float:
         """Получение умной задержки с джиттером"""
@@ -981,9 +1014,19 @@ class MediaDownloader:
                             return False
                             
                     except Exception as e:
-                        if "flood" in str(e).lower():
+                        error_type = type(e).__name__
+                        error_msg = str(e).lower()
+                        
+                        # Специальная обработка различных типов ошибок
+                        if "flood" in error_msg or "rate limit" in error_msg:
                             # Обработка других типов flood wait ошибок
                             flood_wait_seconds = 10  # По умолчанию
+                            # Пытаемся извлечь время ожидания из сообщения
+                            import re
+                            match = re.search(r'(\d+)\s*second', error_msg)
+                            if match:
+                                flood_wait_seconds = int(match.group(1))
+                            
                             self._adapt_to_flood_wait(flood_wait_seconds)
                             
                             if attempt < max_retries - 1:
@@ -991,13 +1034,30 @@ class MediaDownloader:
                                 print(f"⏳ {filename}: обнаружен flood wait, ожидание {wait_time:.1f}s...")
                                 await asyncio.sleep(wait_time)
                                 continue
+                        elif "connection" in error_msg or "network" in error_msg:
+                            # Сетевые ошибки - увеличиваем задержку
+                            if attempt < max_retries - 1:
+                                wait_time = random.uniform(3, 8)
+                                print(f"🌐 {filename}: сетевая ошибка, ожидание {wait_time:.1f}s...")
+                                await asyncio.sleep(wait_time)
+                                continue
+                        elif "permission" in error_msg or "access" in error_msg:
+                            # Ошибки доступа - не повторяем
+                            print(f"🔒 {filename}: ошибка доступа: {e}")
+                            return False
+                        elif "file" in error_msg and ("not found" in error_msg or "does not exist" in error_msg):
+                            # Файл не найден - не повторяем
+                            print(f"📂 {filename}: файл недоступен: {e}")
+                            return False
                         
+                        # Общая обработка других ошибок
                         if attempt < max_retries - 1:
-                            print(f"⚠️ {filename}: ошибка {type(e).__name__}, попытка {attempt + 2}/{max_retries}")
-                            await asyncio.sleep(random.uniform(1, 3))
+                            wait_time = random.uniform(1, 4)
+                            print(f"⚠️ {filename}: ошибка {error_type}, попытка {attempt + 2}/{max_retries} через {wait_time:.1f}s")
+                            await asyncio.sleep(wait_time)
                             continue
                         else:
-                            print(f"✗ {filename}: {type(e).__name__}: {e}")
+                            print(f"✗ {filename}: {error_type}: {e}")
                             return False
                 
                 return False
@@ -1113,15 +1173,23 @@ class MediaDownloader:
         return len(self.download_queue)
     
     def get_download_stats(self) -> Dict[str, Any]:
-        """Получение статистики загрузок"""
+        """Получение подробной статистики загрузок"""
+        session_time = time.time() - self.download_stats['session_start_time']
+        
         return {
             'total_attempts': self.download_stats['total_attempts'],
             'successful_downloads': self.download_stats['successful_downloads'],
             'flood_waits': self.download_stats['flood_waits'],
             'average_speed': self.download_stats['average_speed'],
             'current_workers': self.current_workers,
+            'max_workers': self.max_workers,
             'adaptive_delay': self.adaptive_delay,
-            'success_rate': (self.download_stats['successful_downloads'] / max(1, self.download_stats['total_attempts'])) * 100
+            'consecutive_successes': self.consecutive_successes,
+            'success_rate': (self.download_stats['successful_downloads'] / max(1, self.download_stats['total_attempts'])) * 100,
+            'flood_wait_rate': (self.download_stats['flood_waits'] / max(1, self.download_stats['total_attempts'])) * 100,
+            'session_duration': session_time,
+            'downloads_per_minute': (self.download_stats['successful_downloads'] / max(1, session_time / 60)) if session_time > 0 else 0,
+            'time_since_last_flood': time.time() - self.last_flood_wait if self.last_flood_wait > 0 else 0
         }
     
     def clear_queue(self):
