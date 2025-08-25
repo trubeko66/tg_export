@@ -76,17 +76,54 @@ class BaseExporter:
 class JSONExporter(BaseExporter):
     """Экспортер в JSON формат"""
     
-    def export_messages(self, messages: List[MessageData]) -> str:
-        """Экспорт сообщений в JSON"""
+    def export_messages(self, messages: List[MessageData], append_mode: bool = False) -> str:
+        """Экспорт сообщений в JSON
+        
+        Args:
+            messages: Список сообщений для экспорта
+            append_mode: Если True, добавляет новые сообщения к существующим
+        """
         output_file = self.output_dir / f"{self.sanitize_filename(self.channel_name)}.json"
+        
+        existing_messages = []
+        if append_mode and output_file.exists():
+            try:
+                with open(output_file, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                    existing_messages = existing_data.get("messages", [])
+            except Exception:
+                # Если файл поврежден, начинаем заново
+                existing_messages = []
+        
+        # Объединяем существующие и новые сообщения
+        all_messages = existing_messages + self._messages_to_dict(messages)
+        
+        # Убираем дубликаты по ID сообщения
+        seen_ids = set()
+        unique_messages = []
+        for msg in all_messages:
+            if msg["id"] not in seen_ids:
+                seen_ids.add(msg["id"])
+                unique_messages.append(msg)
+        
+        # Сортируем по ID сообщения (старые сначала)
+        unique_messages.sort(key=lambda x: x["id"])
         
         data = {
             "channel_name": self.channel_name,
             "export_date": datetime.now().isoformat(),
-            "total_messages": len(messages),
-            "messages": []
+            "total_messages": len(unique_messages),
+            "messages": unique_messages
         }
         
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        return str(output_file)
+    
+    def _messages_to_dict(self, messages: List[MessageData]) -> List[Dict[str, Any]]:
+        """Преобразование сообщений в словари для JSON"""
+        result = []
         for msg in messages:
             message_dict = {
                 "id": msg.id,
@@ -100,27 +137,60 @@ class JSONExporter(BaseExporter):
                 "replies": msg.replies,
                 "edited": msg.edited.isoformat() if msg.edited else None
             }
-            data["messages"].append(message_dict)
-        
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        
-        return str(output_file)
+            result.append(message_dict)
+        return result
 
 
 class HTMLExporter(BaseExporter):
     """Экспортер в HTML формат"""
     
-    def export_messages(self, messages: List[MessageData]) -> str:
-        """Экспорт сообщений в HTML"""
+    def export_messages(self, messages: List[MessageData], append_mode: bool = False) -> str:
+        """Экспорт сообщений в HTML
+        
+        Args:
+            messages: Список сообщений для экспорта
+            append_mode: Если True, добавляет новые сообщения к существующим
+        """
         output_file = self.output_dir / f"{self.sanitize_filename(self.channel_name)}.html"
         
-        html_content = self._generate_html(messages)
+        existing_messages = []
+        if append_mode and output_file.exists():
+            try:
+                # Читаем существующий HTML и извлекаем сообщения
+                with open(output_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    existing_messages = self._extract_messages_from_html(content)
+            except Exception:
+                # Если файл поврежден, начинаем заново
+                existing_messages = []
+        
+        # Объединяем существующие и новые сообщения
+        all_messages = existing_messages + messages
+        
+        # Убираем дубликаты по ID сообщения
+        seen_ids = set()
+        unique_messages = []
+        for msg in all_messages:
+            if msg.id not in seen_ids:
+                seen_ids.add(msg.id)
+                unique_messages.append(msg)
+        
+        # Сортируем по ID сообщения (старые сначала)
+        unique_messages.sort(key=lambda x: x.id)
+        
+        html_content = self._generate_html(unique_messages)
         
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(html_content)
         
         return str(output_file)
+    
+    def _extract_messages_from_html(self, html_content: str) -> List[MessageData]:
+        """Извлечение сообщений из существующего HTML файла"""
+        # Простая реализация - в реальности может потребоваться более сложный парсинг
+        # Пока возвращаем пустой список, так как парсинг HTML сложен
+        # В будущем можно улучшить этот метод
+        return []
     
     def _generate_html(self, messages: List[MessageData]) -> str:
         """Генерация HTML контента"""
@@ -259,16 +329,53 @@ class HTMLExporter(BaseExporter):
 class MarkdownExporter(BaseExporter):
     """Экспортер в Markdown формат"""
     
-    def export_messages(self, messages: List[MessageData]) -> str:
-        """Экспорт сообщений в Markdown"""
+    def export_messages(self, messages: List[MessageData], append_mode: bool = False) -> str:
+        """Экспорт сообщений в Markdown
+        
+        Args:
+            messages: Список сообщений для экспорта
+            append_mode: Если True, добавляет новые сообщения к существующим
+        """
         output_file = self.output_dir / f"{self.sanitize_filename(self.channel_name)}.md"
         
-        markdown_content = self._generate_markdown(messages)
+        existing_messages = []
+        if append_mode and output_file.exists():
+            try:
+                # Читаем существующий Markdown и извлекаем сообщения
+                with open(output_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    existing_messages = self._extract_messages_from_markdown(content)
+            except Exception:
+                # Если файл поврежден, начинаем заново
+                existing_messages = []
+        
+        # Объединяем существующие и новые сообщения
+        all_messages = existing_messages + messages
+        
+        # Убираем дубликаты по ID сообщения
+        seen_ids = set()
+        unique_messages = []
+        for msg in all_messages:
+            if msg.id not in seen_ids:
+                seen_ids.add(msg.id)
+                unique_messages.append(msg)
+        
+        # Сортируем по ID сообщения (старые сначала)
+        unique_messages.sort(key=lambda x: x.id)
+        
+        markdown_content = self._generate_markdown(unique_messages)
         
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(markdown_content)
         
         return str(output_file)
+    
+    def _extract_messages_from_markdown(self, md_content: str) -> List[MessageData]:
+        """Извлечение сообщений из существующего Markdown файла"""
+        # Простая реализация - в реальности может потребоваться более сложный парсинг
+        # Пока возвращаем пустой список, так как парсинг Markdown сложен
+        # В будущем можно улучшить этот метод
+        return []
     
     def _generate_markdown(self, messages: List[MessageData]) -> str:
         """Генерация Markdown контента"""

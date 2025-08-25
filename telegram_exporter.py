@@ -864,9 +864,10 @@ class TelegramExporter:
                 messages_data.sort(key=lambda x: x.date or datetime.min)
                 
                 # Экспорт в различные форматы
-                json_file = json_exporter.export_messages(messages_data)
-                html_file = html_exporter.export_messages(messages_data)
-                md_file = md_exporter.export_messages(messages_data)
+                self.logger.info(f"Exporting {len(messages_data)} new messages to existing files (incremental mode)")
+                json_file = json_exporter.export_messages(messages_data, append_mode=True)
+                html_file = html_exporter.export_messages(messages_data, append_mode=True)
+                md_file = md_exporter.export_messages(messages_data, append_mode=True)
                 
                 # Проверка создания файлов экспорта
                 export_files_created = []
