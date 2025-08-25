@@ -65,6 +65,9 @@ class ExportStats:
     last_export_time: Optional[str] = None
     current_export_info: Optional[str] = None  # Информация о текущем экспорте
     total_messages_in_channel: int = 0  # Общее количество сообщений в текущем канале
+    download_speed_files_per_sec: float = 0.0  # Текущая скорость в файлах/сек
+    download_speed_mb_per_sec: float = 0.0     # Текущая скорость в МБ/сек
+    remaining_files_to_download: int = 0       # Осталось файлов к скачиванию
 
 
 class TelegramExporter:
@@ -608,6 +611,12 @@ class TelegramExporter:
         stats_text.append(f"Отфильтровано: {self.stats.filtered_messages}\n", style="magenta")
         stats_text.append(f"Последний экспорт: {self.stats.last_export_time or 'Никогда'}\n", style="blue")
         
+        # Текущая скорость и оставшиеся файлы
+        if self.stats.download_speed_files_per_sec > 0 or self.stats.download_speed_mb_per_sec > 0 or self.stats.remaining_files_to_download > 0:
+            stats_text.append("\nЗагрузка медиа:\n", style="bold yellow")
+            stats_text.append(f"Скорость: {self.stats.download_speed_files_per_sec:.1f} ф/с, {self.stats.download_speed_mb_per_sec:.1f} МБ/с\n", style="yellow")
+            stats_text.append(f"Осталось файлов: {self.stats.remaining_files_to_download}\n", style="yellow")
+        
         # Добавляем информацию о текущем экспорте
         if self.stats.current_export_info:
             stats_text.append(f"\nТекущий экспорт:\n", style="green")
@@ -801,6 +810,18 @@ class TelegramExporter:
                 max_delay = 3.0
             
             media_downloader = MediaDownloader(channel_dir, max_workers=media_threads)
+            # Колбэк прогресса для обновления статистики в реальном времени
+            def _on_progress(progress: Dict[str, float]):
+                try:
+                    self.stats.download_speed_files_per_sec = float(progress.get('files_per_sec', 0.0))
+                    self.stats.download_speed_mb_per_sec = float(progress.get('mb_per_sec', 0.0))
+                    self.stats.remaining_files_to_download = int(progress.get('remaining', 0))
+                    # Обновим информационную строку
+                    if self.stats.current_export_info:
+                        self.stats.current_export_info += f" | Осталось файлов: {self.stats.remaining_files_to_download}"
+                except Exception:
+                    pass
+            media_downloader.progress_callback = _on_progress
             
             # Применяем дополнительные настройки если включена адаптивная загрузка
             if adaptive_download:
@@ -985,6 +1006,10 @@ class TelegramExporter:
                     
                     try:
                         downloaded_files = await media_downloader.download_queue_parallel()
+                        # После завершения загрузки сбрасываем скорость и оставшиеся
+                        self.stats.download_speed_files_per_sec = 0.0
+                        self.stats.download_speed_mb_per_sec = 0.0
+                        self.stats.remaining_files_to_download = 0
                         
                         # Получаем статистику загрузки
                         stats = media_downloader.get_download_stats()
