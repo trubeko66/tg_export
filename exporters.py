@@ -725,6 +725,11 @@ class MediaDownloader:
             filename = f"msg_{message.id}_{media_type}{extension}"
             file_path = self.media_dir / filename
             
+            # Проверяем, не существует ли уже файл с правильным размером
+            if file_path.exists() and file_path.stat().st_size > 0:
+                # Файл уже существует и имеет размер больше 0
+                return f"media/{filename}"
+            
             # Добавляем в очередь загрузки
             self.download_queue.append({
                 'client': client,
@@ -746,6 +751,9 @@ class MediaDownloader:
             return {}
         
         results = {}
+        failed_downloads = []
+        
+        print(f"Начинаем параллельную загрузку {len(self.download_queue)} файлов используя {self.max_workers} потоков")
         
         # Создаем пул потоков для загрузки
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -757,18 +765,53 @@ class MediaDownloader:
                 future_to_item[future] = item
             
             # Ожидаем завершения всех загрузок
+            completed = 0
             for future in concurrent.futures.as_completed(future_to_item):
                 item = future_to_item[future]
+                completed += 1
+                
                 try:
                     success = future.result()
                     if success:
                         results[item['message'].id] = f"media/{item['filename']}"
                         self.downloaded_files[item['message'].id] = f"media/{item['filename']}"
+                        print(f"✓ Загружен файл {item['filename']} ({completed}/{len(self.download_queue)})")
+                    else:
+                        failed_downloads.append(item)
+                        print(f"✗ Не удалось загрузить файл {item['filename']} ({completed}/{len(self.download_queue)})")
                 except Exception as e:
-                    print(f"Ошибка загрузки файла для сообщения {item['message'].id}: {e}")
+                    failed_downloads.append(item)
+                    print(f"✗ Ошибка загрузки файла {item['filename']} для сообщения {item['message'].id}: {e}")
+        
+        # Пытаемся повторить загрузку неудачных файлов
+        if failed_downloads:
+            print(f"Повторная попытка загрузки {len(failed_downloads)} неудачных файлов...")
+            retry_results = {}
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(2, len(failed_downloads))) as executor:
+                future_to_item = {}
+                for item in failed_downloads:
+                    future = executor.submit(self._download_single_file, item)
+                    future_to_item[future] = item
+                
+                for future in concurrent.futures.as_completed(future_to_item):
+                    item = future_to_item[future]
+                    try:
+                        success = future.result()
+                        if success:
+                            retry_results[item['message'].id] = f"media/{item['filename']}"
+                            self.downloaded_files[item['message'].id] = f"media/{item['filename']}"
+                            print(f"✓ Повторная загрузка успешна: {item['filename']}")
+                    except Exception as e:
+                        print(f"✗ Повторная загрузка не удалась: {item['filename']} - {e}")
+            
+            # Объединяем результаты
+            results.update(retry_results)
         
         # Очищаем очередь
         self.download_queue.clear()
+        
+        print(f"Загрузка завершена. Успешно: {len(results)}, Неудачно: {len(failed_downloads) - len([k for k in retry_results.keys()])}")
         
         return results
     
@@ -779,18 +822,43 @@ class MediaDownloader:
             message = item['message']
             file_path = item['file_path']
             
-            # Синхронная загрузка файла
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # Проверяем, что файл еще не существует
+            if file_path.exists():
+                # Если файл уже существует, проверяем его размер
+                if file_path.stat().st_size > 0:
+                    return True
+                else:
+                    # Удаляем файл с нулевым размером
+                    file_path.unlink()
             
+            # Создаем новый event loop для этого потока
             try:
+                # Создаем новый event loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Загружаем файл
                 loop.run_until_complete(client.download_media(message, file_path))
-                return file_path.exists()
+                
+                # Проверяем, что файл был создан и имеет размер больше 0
+                if file_path.exists() and file_path.stat().st_size > 0:
+                    return True
+                else:
+                    print(f"Файл {item['filename']} загружен, но имеет размер 0 байт")
+                    return False
+                    
+            except Exception as e:
+                print(f"Ошибка загрузки файла {item['filename']}: {e}")
+                return False
             finally:
-                loop.close()
+                # Закрываем loop
+                try:
+                    loop.close()
+                except:
+                    pass
                 
         except Exception as e:
-            print(f"Ошибка загрузки файла {item['filename']}: {e}")
+            print(f"Общая ошибка при загрузке файла {item['filename']}: {e}")
             return False
     
     def get_downloaded_file(self, message_id: int) -> Optional[str]:

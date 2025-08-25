@@ -914,12 +914,22 @@ class TelegramExporter:
                                 # Проверяем, был ли файл успешно загружен
                                 actual_path = media_downloader.get_downloaded_file(msg_data.id)
                                 if actual_path:
-                                    msg_data.media_path = actual_path
-                                    # Подсчитываем размер файла
-                                    file_size = media_downloader.get_file_size_mb(channel_dir / actual_path)
-                                    total_size += file_size
+                                    # Проверяем, что файл действительно существует и имеет размер больше 0
+                                    full_path = channel_dir / actual_path
+                                    if full_path.exists() and full_path.stat().st_size > 0:
+                                        msg_data.media_path = actual_path
+                                        # Подсчитываем размер файла
+                                        file_size = media_downloader.get_file_size_mb(actual_path)
+                                        total_size += file_size
+                                        self.logger.info(f"Media file {actual_path} loaded successfully, size: {file_size:.2f} MB")
+                                    else:
+                                        # Файл существует, но имеет размер 0 - считаем его неудачной загрузкой
+                                        self.logger.warning(f"Media file {actual_path} has size 0, removing reference")
+                                        msg_data.media_path = None
+                                        msg_data.media_type = None
                                 else:
                                     # Файл не был загружен, убираем ссылку
+                                    self.logger.warning(f"Media file for message {msg_data.id} was not downloaded")
                                     msg_data.media_path = None
                                     msg_data.media_type = None
                         
