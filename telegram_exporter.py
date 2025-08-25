@@ -966,6 +966,17 @@ class TelegramExporter:
                 # Сортировка сообщений по дате (старые сначала)
                 messages_data.sort(key=lambda x: x.date or datetime.min)
                 
+                # Проверяем режим экспорта - если файлы не существуют, создаем их с нуля
+                export_mode = "incremental"  # По умолчанию инкрементальный режим
+                
+                json_file_path = json_exporter.output_dir / f"{json_exporter.sanitize_filename(json_exporter.channel_name)}.json"
+                html_file_path = html_exporter.output_dir / f"{html_exporter.sanitize_filename(html_exporter.channel_name)}.html" 
+                md_file_path = md_exporter.output_dir / f"{md_exporter.sanitize_filename(md_exporter.channel_name)}.md"
+                
+                if not json_file_path.exists() or not html_file_path.exists() or not md_file_path.exists():
+                    export_mode = "initial"
+                    self.logger.info(f"Initial export mode for {channel.title} - creating files from scratch")
+                
                 # Параллельная загрузка всех медиафайлов
                 if media_downloader.get_queue_size() > 0:
                     queue_size = media_downloader.get_queue_size()
@@ -1016,10 +1027,13 @@ class TelegramExporter:
                             msg_data.media_type = None
                 
                 # Экспорт в различные форматы
-                self.logger.info(f"Exporting {len(messages_data)} new messages to existing files (incremental mode)")
-                json_file = json_exporter.export_messages(messages_data, append_mode=True)
-                html_file = html_exporter.export_messages(messages_data, append_mode=True)
-                md_file = md_exporter.export_messages(messages_data, append_mode=True)
+                append_mode = (export_mode == "incremental")
+                mode_description = "incremental mode" if append_mode else "initial mode"
+                self.logger.info(f"Exporting {len(messages_data)} messages in {mode_description}")
+                
+                json_file = json_exporter.export_messages(messages_data, append_mode=append_mode)
+                html_file = html_exporter.export_messages(messages_data, append_mode=append_mode)
+                md_file = md_exporter.export_messages(messages_data, append_mode=append_mode)
                 
                 # Проверка создания файлов экспорта
                 export_files_created = []
@@ -1068,6 +1082,41 @@ class TelegramExporter:
             else:
                 self.logger.info(f"No new messages found in {channel.title}")
                 channel.last_check = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Проверяем, существуют ли файлы экспорта, если нет - создаем пустые
+                export_files_to_check = [
+                    (json_exporter, "JSON"),
+                    (html_exporter, "HTML"), 
+                    (md_exporter, "Markdown")
+                ]
+                
+                missing_files = []
+                for exporter, format_name in export_files_to_check:
+                    expected_file = None
+                    if format_name == "JSON":
+                        expected_file = exporter.output_dir / f"{exporter.sanitize_filename(exporter.channel_name)}.json"
+                    elif format_name == "HTML":
+                        expected_file = exporter.output_dir / f"{exporter.sanitize_filename(exporter.channel_name)}.html"
+                    elif format_name == "Markdown":
+                        expected_file = exporter.output_dir / f"{exporter.sanitize_filename(exporter.channel_name)}.md"
+                    
+                    if expected_file and not expected_file.exists():
+                        missing_files.append((exporter, format_name))
+                
+                # Создаем отсутствующие файлы с пустым содержимым
+                if missing_files:
+                    self.logger.info(f"Creating missing export files for {channel.title}: {[f[1] for f in missing_files]}")
+                    
+                    for exporter, format_name in missing_files:
+                        try:
+                            # Создаем файл с пустым списком сообщений
+                            empty_file = exporter.export_messages([], append_mode=False)
+                            if empty_file and Path(empty_file).exists():
+                                self.logger.info(f"Created empty {format_name} file: {empty_file}")
+                            else:
+                                self.logger.error(f"Failed to create empty {format_name} file")
+                        except Exception as e:
+                            self.logger.error(f"Error creating empty {format_name} file: {e}")
                 
                 # Если экспорт прошел без сообщений, но в канале есть сообщения - повторная проверка
                 if total_messages_in_channel > 0:
