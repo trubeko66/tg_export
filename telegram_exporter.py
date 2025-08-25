@@ -51,6 +51,7 @@ class ChannelInfo:
     last_message_id: int = 0
     total_messages: int = 0
     last_check: Optional[str] = None
+    media_size_mb: float = 0.0  # Кэшированный размер медиафайлов в МБ
 
 
 @dataclass
@@ -571,32 +572,21 @@ class TelegramExporter:
         for channel in self.channels:
             last_check = channel.last_check or "Никогда"
             
-            # Вычисляем объем файлов для канала
-            channel_size = 0.0
-            try:
-                storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
-                base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
-                base_path = Path(base_dir)
-                channel_dir = base_path / channel.title.replace('/', '_').replace('\\', '_')
-                
-                if channel_dir.exists() and channel_dir.is_dir():
-                    # Подсчитываем размер всех файлов в папке канала
-                    for file_path in channel_dir.rglob('*'):
-                        if file_path.is_file():
-                            try:
-                                channel_size += file_path.stat().st_size
-                            except (OSError, PermissionError):
-                                pass
-                    channel_size = channel_size / (1024 * 1024)  # Конвертируем в МБ
-            except Exception:
-                channel_size = 0.0
+            # Вычисляем объем скачанных медиафайлов для канала
+            channel_size = self._calculate_channel_media_size(channel)
             
-            # Форматируем размер файлов
+            # Форматируем размер файлов с улучшенной точностью
             if channel_size > 0:
                 if channel_size >= 1024:
-                    size_str = f"{channel_size/1024:.1f} ГБ"
-                else:
+                    # Гигабайты
+                    size_str = f"{channel_size/1024:.2f} ГБ"
+                elif channel_size >= 1:
+                    # Мегабайты
                     size_str = f"{channel_size:.1f} МБ"
+                else:
+                    # Килобайты для небольших размеров
+                    size_kb = channel_size * 1024
+                    size_str = f"{size_kb:.0f} КБ"
             else:
                 size_str = "—"
             
@@ -731,14 +721,25 @@ class TelegramExporter:
             html_exporter = HTMLExporter(channel.title, channel_dir)
             md_exporter = MarkdownExporter(channel.title, channel_dir)
             
-            # Получаем количество потоков для загрузки медиа из конфигурации
+            # Получаем настройки для загрузки медиа из конфигурации
             try:
                 storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
                 media_threads = getattr(storage_cfg, 'media_download_threads', 4) or 4
+                adaptive_download = getattr(storage_cfg, 'adaptive_download', True)
+                min_delay = getattr(storage_cfg, 'min_download_delay', 0.1)
+                max_delay = getattr(storage_cfg, 'max_download_delay', 3.0)
             except Exception:
                 media_threads = 4
+                adaptive_download = True
+                min_delay = 0.1
+                max_delay = 3.0
             
             media_downloader = MediaDownloader(channel_dir, max_workers=media_threads)
+            
+            # Применяем дополнительные настройки если включена адаптивная загрузка
+            if adaptive_download:
+                media_downloader.min_delay = min_delay
+                media_downloader.max_delay = max_delay
 
             # Получение сообщений
             messages_data = []
@@ -901,12 +902,20 @@ class TelegramExporter:
                 
                 # Параллельная загрузка всех медиафайлов
                 if media_downloader.get_queue_size() > 0:
-                    self.logger.info(f"Starting parallel download of {media_downloader.get_queue_size()} media files using {media_downloader.max_workers} threads")
-                    self.stats.current_export_info = f"Загрузка медиа: {channel.title} | {media_downloader.get_queue_size()} файлов | {media_downloader.max_workers} потоков"
+                    queue_size = media_downloader.get_queue_size()
+                    self.logger.info(f"Starting intelligent download of {queue_size} media files")
+                    self.stats.current_export_info = f"Интеллектуальная загрузка: {channel.title} | {queue_size} файлов"
                     
                     try:
                         downloaded_files = await media_downloader.download_queue_parallel()
-                        self.logger.info(f"Successfully downloaded {len(downloaded_files)} media files")
+                        
+                        # Получаем статистику загрузки
+                        stats = media_downloader.get_download_stats()
+                        
+                        self.logger.info(f"Download completed: {len(downloaded_files)} files successful")
+                        self.logger.info(f"Download stats: {stats['success_rate']:.1f}% success rate, "
+                                       f"{stats['flood_waits']} flood waits, "
+                                       f"{stats['average_speed']:.1f} files/sec")
                         
                         # Обновляем пути к медиафайлам в данных сообщений
                         for msg_data in messages_data:

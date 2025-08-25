@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from telethon.tl.types import Message, MessageMediaPhoto, MessageMediaDocument
+from telethon.errors import FloodWaitError
+import time
+import random
 
 
 @dataclass
@@ -653,15 +656,64 @@ class MarkdownExporter(BaseExporter):
 
 
 class MediaDownloader:
-    """Класс для загрузки медиафайлов с поддержкой многопоточности"""
+    """Класс для загрузки медиафайлов с интеллектуальной системой управления нагрузкой"""
     
     def __init__(self, output_dir: Path, max_workers: int = 4):
         self.output_dir = output_dir
         self.media_dir = output_dir / "media"
         self.media_dir.mkdir(exist_ok=True)
+        
+        # Динамическое управление потоками
         self.max_workers = max_workers
+        self.current_workers = min(2, max_workers)  # Начинаем с меньшего количества
         self.download_queue = []
         self.downloaded_files = {}
+        
+        # Система управления нагрузкой
+        self.flood_wait_count = 0
+        self.last_flood_wait = 0
+        self.success_count = 0
+        self.adaptive_delay = 0.5  # Начальная задержка между запросами
+        self.min_delay = 0.1
+        self.max_delay = 3.0
+        
+        # Статистика для адаптации
+        self.download_stats = {
+            'total_attempts': 0,
+            'successful_downloads': 0,
+            'flood_waits': 0,
+            'average_speed': 0.0
+        }
+    
+    def _adapt_to_flood_wait(self, flood_wait_seconds: int):
+        """Адаптация к flood wait"""
+        self.flood_wait_count += 1
+        self.last_flood_wait = time.time()
+        self.download_stats['flood_waits'] += 1
+        
+        # Увеличиваем задержку и уменьшаем количество потоков
+        self.adaptive_delay = min(self.max_delay, self.adaptive_delay * 1.5)
+        self.current_workers = max(1, self.current_workers - 1)
+        
+        print(f"🚫 Flood wait {flood_wait_seconds}s - адаптация: задержка {self.adaptive_delay:.1f}s, потоков {self.current_workers}")
+    
+    def _adapt_to_success(self):
+        """Адаптация к успешным загрузкам"""
+        self.success_count += 1
+        self.download_stats['successful_downloads'] += 1
+        
+        # Если нет flood wait'ов некоторое время, можно ускориться
+        if time.time() - self.last_flood_wait > 60:  # 1 минута без flood wait
+            if self.success_count % 10 == 0:  # Каждые 10 успешных загрузок
+                self.adaptive_delay = max(self.min_delay, self.adaptive_delay * 0.9)
+                self.current_workers = min(self.max_workers, self.current_workers + 1)
+                print(f"⚡ Ускорение: задержка {self.adaptive_delay:.1f}s, потоков {self.current_workers}")
+    
+    def _get_smart_delay(self) -> float:
+        """Получение умной задержки с джиттером"""
+        # Добавляем случайность для избежания синхронизации запросов
+        jitter = random.uniform(0.8, 1.2)
+        return self.adaptive_delay * jitter
     
     async def download_media(self, client, message: Message) -> Optional[str]:
         """Загрузка медиафайла из сообщения (синхронная версия для совместимости)"""
@@ -746,74 +798,220 @@ class MediaDownloader:
             return ""
     
     async def download_queue_parallel(self) -> Dict[int, str]:
-        """Параллельная загрузка всех файлов из очереди с использованием asyncio.gather"""
+        """Интеллектуальная параллельная загрузка с адаптивным управлением нагрузкой"""
         if not self.download_queue:
             return {}
         
         results = {}
-        failed_downloads = []
+        total_files = len(self.download_queue)
         
-        print(f"Начинаем параллельную загрузку {len(self.download_queue)} файлов используя {self.max_workers} одновременных задач")
+        print(f"🚀 Начинаем интеллектуальную загрузку {total_files} файлов")
+        print(f"📊 Начальные настройки: потоков {self.current_workers}, задержка {self.adaptive_delay:.1f}s")
         
-        # Создаем семафор для ограничения количества одновременных загрузок
-        semaphore = asyncio.Semaphore(self.max_workers)
+        start_time = time.time()
         
-        # Создаем async задачи для загрузки
-        download_tasks = []
-        for item in self.download_queue:
-            task = self._download_single_file_async(item, semaphore)
-            download_tasks.append(task)
+        # Разбиваем очередь на батчи для лучшего контроля
+        batch_size = max(5, self.current_workers * 2)
+        batches = [self.download_queue[i:i + batch_size] for i in range(0, len(self.download_queue), batch_size)]
         
-        # Выполняем все задачи параллельно
-        download_results = await asyncio.gather(*download_tasks, return_exceptions=True)
-        
-        # Обрабатываем результаты
-        for i, result in enumerate(download_results):
-            item = self.download_queue[i]
+        for batch_num, batch in enumerate(batches, 1):
+            print(f"📦 Обработка батча {batch_num}/{len(batches)} ({len(batch)} файлов)")
             
-            if isinstance(result, Exception):
-                failed_downloads.append(item)
-                print(f"✗ Ошибка загрузки файла {item['filename']} для сообщения {item['message'].id}: {result}")
-            elif result:
-                results[item['message'].id] = f"media/{item['filename']}"
-                self.downloaded_files[item['message'].id] = f"media/{item['filename']}"
-                print(f"✓ Загружен файл {item['filename']} ({len(results)}/{len(self.download_queue)})")
-            else:
-                failed_downloads.append(item)
-                print(f"✗ Не удалось загрузить файл {item['filename']} ({len(results)}/{len(self.download_queue)})")
-        
-        # Пытаемся повторить загрузку неудачных файлов
-        if failed_downloads:
-            print(f"Повторная попытка загрузки {len(failed_downloads)} неудачных файлов...")
-            retry_semaphore = asyncio.Semaphore(min(2, len(failed_downloads)))
+            # Создаем семафор с текущим количеством потоков
+            semaphore = asyncio.Semaphore(self.current_workers)
             
-            retry_tasks = []
-            for item in failed_downloads:
-                task = self._download_single_file_async(item, retry_semaphore)
-                retry_tasks.append(task)
+            # Создаем задачи для текущего батча
+            batch_tasks = []
+            for item in batch:
+                task = self._download_single_file_async_smart(item, semaphore)
+                batch_tasks.append(task)
             
-            retry_results_list = await asyncio.gather(*retry_tasks, return_exceptions=True)
+            # Выполняем батч
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
             
-            for i, result in enumerate(retry_results_list):
-                item = failed_downloads[i]
+            # Обрабатываем результаты батча
+            batch_successful = 0
+            for i, result in enumerate(batch_results):
+                item = batch[i]
+                
                 if isinstance(result, Exception):
-                    print(f"✗ Повторная загрузка не удалась: {item['filename']} - {result}")
+                    print(f"✗ Ошибка загрузки файла {item['filename']}: {result}")
                 elif result:
                     results[item['message'].id] = f"media/{item['filename']}"
                     self.downloaded_files[item['message'].id] = f"media/{item['filename']}"
-                    print(f"✓ Повторная загрузка успешна: {item['filename']}")
+                    batch_successful += 1
+                    self._adapt_to_success()
+            
+            print(f"📊 Батч {batch_num}: успешно {batch_successful}/{len(batch)}, "
+                  f"всего {len(results)}/{total_files}")
+            
+            # Небольшая пауза между батчами для стабильности
+            if batch_num < len(batches):
+                await asyncio.sleep(0.5)
         
-        # Сохраняем общее количество файлов до очистки очереди
-        total_files = len(self.download_queue)
+        # Повторная попытка для неудачных загрузок
+        failed_items = [item for item in self.download_queue if item['message'].id not in results]
+        
+        if failed_items and len(failed_items) < total_files * 0.3:  # Повторяем только если неудач < 30%
+            print(f"🔄 Повторная попытка для {len(failed_items)} файлов с консервативными настройками...")
+            
+            # Более консервативные настройки для повтора
+            retry_semaphore = asyncio.Semaphore(1)  # Только 1 поток для повтора
+            
+            retry_tasks = []
+            for item in failed_items:
+                # Увеличиваем задержку для повторных попыток
+                task = self._download_single_file_async_smart(item, retry_semaphore, retry_mode=True)
+                retry_tasks.append(task)
+            
+            retry_results = await asyncio.gather(*retry_tasks, return_exceptions=True)
+            
+            retry_successful = 0
+            for i, result in enumerate(retry_results):
+                item = failed_items[i]
+                if isinstance(result, Exception):
+                    print(f"✗ Повторная загрузка не удалась: {item['filename']}")
+                elif result:
+                    results[item['message'].id] = f"media/{item['filename']}"
+                    self.downloaded_files[item['message'].id] = f"media/{item['filename']}"
+                    retry_successful += 1
+            
+            print(f"🔄 Повторная попытка: успешно {retry_successful}/{len(failed_items)}")
         
         # Очищаем очередь
         self.download_queue.clear()
         
+        # Статистика
+        elapsed_time = time.time() - start_time
         successful_count = len(results)
         failed_count = total_files - successful_count
-        print(f"Загрузка завершена. Успешно: {successful_count}, Неудачно: {failed_count}")
+        avg_speed = successful_count / elapsed_time if elapsed_time > 0 else 0
+        
+        self.download_stats['average_speed'] = avg_speed
+        
+        print(f"✅ Загрузка завершена за {elapsed_time:.1f}с")
+        print(f"📊 Результат: успешно {successful_count}, неудачно {failed_count}")
+        print(f"⚡ Средняя скорость: {avg_speed:.1f} файлов/сек")
+        print(f"🚫 Flood wait событий: {self.download_stats['flood_waits']}")
         
         return results
+    
+    async def _download_single_file_async_smart(self, item: Dict, semaphore: asyncio.Semaphore, retry_mode: bool = False) -> bool:
+        """Умная загрузка файла с обработкой flood wait и адаптивными задержками"""
+        async with semaphore:
+            try:
+                client = item['client']
+                message = item['message']
+                file_path = item['file_path']
+                filename = item['filename']
+                
+                self.download_stats['total_attempts'] += 1
+                
+                # Проверяем существующий файл
+                if file_path.exists() and file_path.stat().st_size > 0:
+                    return True
+                
+                # Удаляем пустые файлы
+                if file_path.exists():
+                    try:
+                        file_path.unlink()
+                    except OSError:
+                        pass
+                
+                # Проверяем медиа
+                if not message.media:
+                    return False
+                
+                # Умная задержка перед загрузкой
+                delay = self._get_smart_delay()
+                if retry_mode:
+                    delay *= 2  # Удваиваем задержку для повторных попыток
+                
+                await asyncio.sleep(delay)
+                
+                # Попытка загрузки с обработкой flood wait
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        download_start = time.time()
+                        
+                        # Загрузка с тайм-аутом
+                        timeout = 120 if retry_mode else 60
+                        await asyncio.wait_for(
+                            client.download_media(message, file_path),
+                            timeout=timeout
+                        )
+                        
+                        download_time = time.time() - download_start
+                        
+                        # Небольшая пауза для завершения записи
+                        await asyncio.sleep(0.1)
+                        
+                        # Проверка результата
+                        if file_path.exists() and file_path.stat().st_size > 0:
+                            file_size = file_path.stat().st_size
+                            speed = file_size / download_time / 1024 / 1024 if download_time > 0 else 0
+                            print(f"✓ {filename}: {file_size:,} байт за {download_time:.1f}с ({speed:.1f} МБ/с)")
+                            return True
+                        else:
+                            print(f"✗ {filename}: файл пуст или не создан")
+                            return False
+                            
+                    except FloodWaitError as e:
+                        flood_wait_seconds = e.seconds
+                        self._adapt_to_flood_wait(flood_wait_seconds)
+                        
+                        if attempt < max_retries - 1:
+                            # Ждем указанное время + небольшой буфер
+                            wait_time = flood_wait_seconds + random.uniform(1, 3)
+                            print(f"⏳ {filename}: flood wait {flood_wait_seconds}s, ожидание {wait_time:.1f}s...")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        else:
+                            print(f"✗ {filename}: превышено количество попыток после flood wait")
+                            return False
+                            
+                    except asyncio.TimeoutError:
+                        if attempt < max_retries - 1:
+                            print(f"⏰ {filename}: тайм-аут, попытка {attempt + 2}/{max_retries}")
+                            await asyncio.sleep(random.uniform(2, 5))
+                            continue
+                        else:
+                            print(f"✗ {filename}: превышено время загрузки")
+                            return False
+                            
+                    except Exception as e:
+                        if "flood" in str(e).lower():
+                            # Обработка других типов flood wait ошибок
+                            flood_wait_seconds = 10  # По умолчанию
+                            self._adapt_to_flood_wait(flood_wait_seconds)
+                            
+                            if attempt < max_retries - 1:
+                                wait_time = flood_wait_seconds + random.uniform(1, 3)
+                                print(f"⏳ {filename}: обнаружен flood wait, ожидание {wait_time:.1f}s...")
+                                await asyncio.sleep(wait_time)
+                                continue
+                        
+                        if attempt < max_retries - 1:
+                            print(f"⚠️ {filename}: ошибка {type(e).__name__}, попытка {attempt + 2}/{max_retries}")
+                            await asyncio.sleep(random.uniform(1, 3))
+                            continue
+                        else:
+                            print(f"✗ {filename}: {type(e).__name__}: {e}")
+                            return False
+                
+                return False
+                
+            except Exception as e:
+                print(f"✗ {filename}: критическая ошибка {type(e).__name__}: {e}")
+                return False
+            finally:
+                # Очистка пустых файлов
+                try:
+                    if file_path.exists() and file_path.stat().st_size == 0:
+                        file_path.unlink()
+                except OSError:
+                    pass
     
     async def _download_single_file_async(self, item: Dict, semaphore: asyncio.Semaphore) -> bool:
         """Асинхронная загрузка одного файла с ограничением через семафор"""
@@ -914,7 +1112,27 @@ class MediaDownloader:
         """Получение размера очереди загрузки"""
         return len(self.download_queue)
     
+    def get_download_stats(self) -> Dict[str, Any]:
+        """Получение статистики загрузок"""
+        return {
+            'total_attempts': self.download_stats['total_attempts'],
+            'successful_downloads': self.download_stats['successful_downloads'],
+            'flood_waits': self.download_stats['flood_waits'],
+            'average_speed': self.download_stats['average_speed'],
+            'current_workers': self.current_workers,
+            'adaptive_delay': self.adaptive_delay,
+            'success_rate': (self.download_stats['successful_downloads'] / max(1, self.download_stats['total_attempts'])) * 100
+        }
+    
     def clear_queue(self):
         """Очистка очереди загрузки"""
         self.download_queue.clear()
         self.downloaded_files.clear()
+        
+        # Сброс статистики
+        self.download_stats = {
+            'total_attempts': 0,
+            'successful_downloads': 0,
+            'flood_waits': 0,
+            'average_speed': 0.0
+        }

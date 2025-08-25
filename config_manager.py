@@ -39,6 +39,9 @@ class StorageConfig:
     channels_path: Optional[str] = ".channels"
     export_base_dir: Optional[str] = "exports"
     media_download_threads: int = 4  # Количество потоков для загрузки медиафайлов
+    adaptive_download: bool = True  # Включить адаптивное управление загрузкой
+    min_download_delay: float = 0.1  # Минимальная задержка между загрузками (сек)
+    max_download_delay: float = 3.0  # Максимальная задержка между загрузками (сек)
 
 
 @dataclass
@@ -298,6 +301,8 @@ class ConfigManager:
             self.console.print(f"  Путь к списку каналов: {self.config.storage.channels_path}")
             self.console.print(f"  Каталог экспорта: {self.config.storage.export_base_dir}")
             self.console.print(f"  Потоки загрузки медиа: {self.config.storage.media_download_threads}")
+            self.console.print(f"  Адаптивная загрузка: {'✅' if self.config.storage.adaptive_download else '❌'}")
+            self.console.print(f"  Задержка загрузки: {self.config.storage.min_download_delay}-{self.config.storage.max_download_delay}с")
         
         self.console.print(table)
         
