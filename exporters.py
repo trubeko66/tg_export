@@ -746,120 +746,157 @@ class MediaDownloader:
             return ""
     
     async def download_queue_parallel(self) -> Dict[int, str]:
-        """Параллельная загрузка всех файлов из очереди"""
+        """Параллельная загрузка всех файлов из очереди с использованием asyncio.gather"""
         if not self.download_queue:
             return {}
         
         results = {}
         failed_downloads = []
         
-        print(f"Начинаем параллельную загрузку {len(self.download_queue)} файлов используя {self.max_workers} потоков")
+        print(f"Начинаем параллельную загрузку {len(self.download_queue)} файлов используя {self.max_workers} одновременных задач")
         
-        # Создаем пул потоков для загрузки
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Создаем задачи для загрузки
-            future_to_item = {}
+        # Создаем семафор для ограничения количества одновременных загрузок
+        semaphore = asyncio.Semaphore(self.max_workers)
+        
+        # Создаем async задачи для загрузки
+        download_tasks = []
+        for item in self.download_queue:
+            task = self._download_single_file_async(item, semaphore)
+            download_tasks.append(task)
+        
+        # Выполняем все задачи параллельно
+        download_results = await asyncio.gather(*download_tasks, return_exceptions=True)
+        
+        # Обрабатываем результаты
+        for i, result in enumerate(download_results):
+            item = self.download_queue[i]
             
-            for item in self.download_queue:
-                future = executor.submit(self._download_single_file, item)
-                future_to_item[future] = item
-            
-            # Ожидаем завершения всех загрузок
-            completed = 0
-            for future in concurrent.futures.as_completed(future_to_item):
-                item = future_to_item[future]
-                completed += 1
-                
-                try:
-                    success = future.result()
-                    if success:
-                        results[item['message'].id] = f"media/{item['filename']}"
-                        self.downloaded_files[item['message'].id] = f"media/{item['filename']}"
-                        print(f"✓ Загружен файл {item['filename']} ({completed}/{len(self.download_queue)})")
-                    else:
-                        failed_downloads.append(item)
-                        print(f"✗ Не удалось загрузить файл {item['filename']} ({completed}/{len(self.download_queue)})")
-                except Exception as e:
-                    failed_downloads.append(item)
-                    print(f"✗ Ошибка загрузки файла {item['filename']} для сообщения {item['message'].id}: {e}")
+            if isinstance(result, Exception):
+                failed_downloads.append(item)
+                print(f"✗ Ошибка загрузки файла {item['filename']} для сообщения {item['message'].id}: {result}")
+            elif result:
+                results[item['message'].id] = f"media/{item['filename']}"
+                self.downloaded_files[item['message'].id] = f"media/{item['filename']}"
+                print(f"✓ Загружен файл {item['filename']} ({len(results)}/{len(self.download_queue)})")
+            else:
+                failed_downloads.append(item)
+                print(f"✗ Не удалось загрузить файл {item['filename']} ({len(results)}/{len(self.download_queue)})")
         
         # Пытаемся повторить загрузку неудачных файлов
         if failed_downloads:
             print(f"Повторная попытка загрузки {len(failed_downloads)} неудачных файлов...")
-            retry_results = {}
+            retry_semaphore = asyncio.Semaphore(min(2, len(failed_downloads)))
             
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(2, len(failed_downloads))) as executor:
-                future_to_item = {}
-                for item in failed_downloads:
-                    future = executor.submit(self._download_single_file, item)
-                    future_to_item[future] = item
-                
-                for future in concurrent.futures.as_completed(future_to_item):
-                    item = future_to_item[future]
-                    try:
-                        success = future.result()
-                        if success:
-                            retry_results[item['message'].id] = f"media/{item['filename']}"
-                            self.downloaded_files[item['message'].id] = f"media/{item['filename']}"
-                            print(f"✓ Повторная загрузка успешна: {item['filename']}")
-                    except Exception as e:
-                        print(f"✗ Повторная загрузка не удалась: {item['filename']} - {e}")
+            retry_tasks = []
+            for item in failed_downloads:
+                task = self._download_single_file_async(item, retry_semaphore)
+                retry_tasks.append(task)
             
-            # Объединяем результаты
-            results.update(retry_results)
+            retry_results_list = await asyncio.gather(*retry_tasks, return_exceptions=True)
+            
+            for i, result in enumerate(retry_results_list):
+                item = failed_downloads[i]
+                if isinstance(result, Exception):
+                    print(f"✗ Повторная загрузка не удалась: {item['filename']} - {result}")
+                elif result:
+                    results[item['message'].id] = f"media/{item['filename']}"
+                    self.downloaded_files[item['message'].id] = f"media/{item['filename']}"
+                    print(f"✓ Повторная загрузка успешна: {item['filename']}")
+        
+        # Сохраняем общее количество файлов до очистки очереди
+        total_files = len(self.download_queue)
         
         # Очищаем очередь
         self.download_queue.clear()
         
-        print(f"Загрузка завершена. Успешно: {len(results)}, Неудачно: {len(failed_downloads) - len([k for k in retry_results.keys()])}")
+        successful_count = len(results)
+        failed_count = total_files - successful_count
+        print(f"Загрузка завершена. Успешно: {successful_count}, Неудачно: {failed_count}")
         
         return results
     
-    def _download_single_file(self, item: Dict) -> bool:
-        """Загрузка одного файла (выполняется в отдельном потоке)"""
-        try:
-            client = item['client']
-            message = item['message']
-            file_path = item['file_path']
-            
-            # Проверяем, что файл еще не существует
-            if file_path.exists():
-                # Если файл уже существует, проверяем его размер
-                if file_path.stat().st_size > 0:
-                    return True
-                else:
-                    # Удаляем файл с нулевым размером
-                    file_path.unlink()
-            
-            # Создаем новый event loop для этого потока
+    async def _download_single_file_async(self, item: Dict, semaphore: asyncio.Semaphore) -> bool:
+        """Асинхронная загрузка одного файла с ограничением через семафор"""
+        async with semaphore:  # Ограничиваем количество одновременных загрузок
             try:
-                # Создаем новый event loop
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+                client = item['client']
+                message = item['message']
+                file_path = item['file_path']
+                filename = item['filename']
                 
-                # Загружаем файл
-                loop.run_until_complete(client.download_media(message, file_path))
+                # Проверяем, что файл еще не существует
+                if file_path.exists():
+                    # Если файл уже существует, проверяем его размер
+                    if file_path.stat().st_size > 0:
+                        return True
+                    else:
+                        # Удаляем файл с нулевым размером
+                        try:
+                            file_path.unlink()
+                        except OSError:
+                            pass
                 
-                # Проверяем, что файл был создан и имеет размер больше 0
-                if file_path.exists() and file_path.stat().st_size > 0:
-                    return True
-                else:
-                    print(f"Файл {item['filename']} загружен, но имеет размер 0 байт")
+                # Проверяем доступность медиа перед загрузкой
+                if not message.media:
+                    print(f"✗ Нет медиа в сообщении для файла {filename}")
+                    return False
+                
+                # Загружаем файл с тайм-аутом
+                try:
+                    # Используем тайм-аут 60 секунд для загрузки одного файла
+                    await asyncio.wait_for(
+                        client.download_media(message, file_path),
+                        timeout=60.0
+                    )
+                    
+                    # Даем небольшую паузу для завершения записи файла
+                    await asyncio.sleep(0.1)
+                    
+                    # Проверяем, что файл был создан и имеет размер больше 0
+                    if file_path.exists() and file_path.stat().st_size > 0:
+                        file_size = file_path.stat().st_size
+                        print(f"✓ Файл {filename} успешно загружен, размер: {file_size:,} байт ({file_size/1024/1024:.2f} МБ)")
+                        return True
+                    else:
+                        print(f"✗ Файл {filename} загружен, но имеет размер 0 байт или не существует")
+                        # Удаляем пустой файл
+                        try:
+                            if file_path.exists():
+                                file_path.unlink()
+                        except OSError:
+                            pass
+                        return False
+                        
+                except asyncio.TimeoutError:
+                    print(f"✗ Тайм-аут при загрузке файла {filename} (превышено 60 секунд)")
+                    # Удаляем частично загруженный файл
+                    try:
+                        if file_path.exists():
+                            file_path.unlink()
+                    except OSError:
+                        pass
+                    return False
+                    
+                except Exception as e:
+                    print(f"✗ Ошибка загрузки файла {filename}: {type(e).__name__}: {e}")
+                    # Удаляем частично загруженный файл
+                    try:
+                        if file_path.exists():
+                            file_path.unlink()
+                    except OSError:
+                        pass
                     return False
                     
             except Exception as e:
-                print(f"Ошибка загрузки файла {item['filename']}: {e}")
+                print(f"✗ Общая ошибка при загрузке файла {item.get('filename', 'unknown')}: {type(e).__name__}: {e}")
                 return False
-            finally:
-                # Закрываем loop
-                try:
-                    loop.close()
-                except:
-                    pass
-                
-        except Exception as e:
-            print(f"Общая ошибка при загрузке файла {item['filename']}: {e}")
-            return False
+    
+    def _download_single_file(self, item: Dict) -> bool:
+        """Загрузка одного файла (устаревший метод для обратной совместимости)"""
+        # Этот метод оставляем для обратной совместимости, но он не должен использоваться
+        # в новой реализации с asyncio.gather
+        print(f"⚠️  Используется устаревший метод _download_single_file для {item.get('filename', 'unknown')}")
+        return False
     
     def get_downloaded_file(self, message_id: int) -> Optional[str]:
         """Получение пути к загруженному файлу"""
