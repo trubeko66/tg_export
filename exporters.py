@@ -11,7 +11,7 @@ import asyncio
 import concurrent.futures
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
 from telethon.tl.types import Message, MessageMediaPhoto, MessageMediaDocument
 from telethon.errors import FloodWaitError
@@ -680,6 +680,9 @@ class MediaDownloader:
         self.download_queue = []
         self.downloaded_files = {}
         
+        # Колбэк для отчета о прогрессе загрузок в реальном времени
+        self.progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        
         # Система управления нагрузкой с улучшенными параметрами
         self.flood_wait_count = 0
         self.last_flood_wait = 0
@@ -837,6 +840,7 @@ class MediaDownloader:
         
         results = {}
         total_files = len(self.download_queue)
+        bytes_downloaded_total = 0
         
         print(f"🚀 Начинаем интеллектуальную загрузку {total_files} файлов")
         print(f"📊 Начальные настройки: потоков {self.current_workers}, задержка {self.adaptive_delay:.1f}s")
@@ -873,10 +877,28 @@ class MediaDownloader:
                     results[item['message'].id] = f"media/{item['filename']}"
                     self.downloaded_files[item['message'].id] = f"media/{item['filename']}"
                     batch_successful += 1
+                    if isinstance(result, int):
+                        bytes_downloaded_total += result
                     self._adapt_to_success()
             
             print(f"📊 Батч {batch_num}: успешно {batch_successful}/{len(batch)}, "
                   f"всего {len(results)}/{total_files}")
+            # Репортим прогресс после батча
+            if self.progress_callback:
+                elapsed = max(1e-6, time.time() - start_time)
+                files_per_sec = len(results) / elapsed
+                mb_per_sec = (bytes_downloaded_total / (1024 * 1024)) / elapsed
+                remaining = max(0, total_files - len(results))
+                try:
+                    self.progress_callback({
+                        'total': total_files,
+                        'completed': len(results),
+                        'remaining': remaining,
+                        'files_per_sec': files_per_sec,
+                        'mb_per_sec': mb_per_sec
+                    })
+                except Exception:
+                    pass
             
             # Небольшая пауза между батчами для стабильности
             if batch_num < len(batches):
@@ -908,6 +930,8 @@ class MediaDownloader:
                     results[item['message'].id] = f"media/{item['filename']}"
                     self.downloaded_files[item['message'].id] = f"media/{item['filename']}"
                     retry_successful += 1
+                    if isinstance(result, int):
+                        bytes_downloaded_total += result
             
             print(f"🔄 Повторная попытка: успешно {retry_successful}/{len(failed_items)}")
         
@@ -927,9 +951,22 @@ class MediaDownloader:
         print(f"⚡ Средняя скорость: {avg_speed:.1f} файлов/сек")
         print(f"🚫 Flood wait событий: {self.download_stats['flood_waits']}")
         
+        # Финальный репорт прогресса
+        if self.progress_callback:
+            try:
+                self.progress_callback({
+                    'total': total_files,
+                    'completed': successful_count,
+                    'remaining': 0,
+                    'files_per_sec': successful_count / max(1e-6, elapsed_time),
+                    'mb_per_sec': (bytes_downloaded_total / (1024 * 1024)) / max(1e-6, elapsed_time)
+                })
+            except Exception:
+                pass
+        
         return results
     
-    async def _download_single_file_async_smart(self, item: Dict, semaphore: asyncio.Semaphore, retry_mode: bool = False) -> bool:
+    async def _download_single_file_async_smart(self, item: Dict, semaphore: asyncio.Semaphore, retry_mode: bool = False) -> bool | int:
         """Умная загрузка файла с обработкой flood wait и адаптивными задержками"""
         async with semaphore:
             try:
@@ -942,7 +979,7 @@ class MediaDownloader:
                 
                 # Проверяем существующий файл
                 if file_path.exists() and file_path.stat().st_size > 0:
-                    return True
+                    return file_path.stat().st_size
                 
                 # Удаляем пустые файлы
                 if file_path.exists():
@@ -985,7 +1022,7 @@ class MediaDownloader:
                             file_size = file_path.stat().st_size
                             speed = file_size / download_time / 1024 / 1024 if download_time > 0 else 0
                             print(f"✓ {filename}: {file_size:,} байт за {download_time:.1f}с ({speed:.1f} МБ/с)")
-                            return True
+                            return file_size
                         else:
                             print(f"✗ {filename}: файл пуст или не создан")
                             return False
