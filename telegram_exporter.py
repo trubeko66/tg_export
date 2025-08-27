@@ -21,6 +21,9 @@ import markdown
 import posixpath
 import zipfile
 from enum import Enum
+import sys
+import threading
+import queue
 
 from content_filter import ContentFilter, FilterConfig
 from telethon import TelegramClient, events
@@ -95,6 +98,11 @@ class TelegramExporter:
         # Параметры прокрутки для главного экрана
         self.channels_scroll_offset = 0
         self.channels_display_limit = 10  # Количество каналов на экране
+        
+        # Очередь для обработки клавиш
+        self.key_queue = queue.Queue()
+        self.key_thread = None
+        self.key_thread_running = False
         
         # Инициализация менеджера конфигурации
         self.config_manager = ConfigManager()
@@ -584,41 +592,9 @@ class TelegramExporter:
         layout["header"].update(Panel(header_text, box=box.DOUBLE))
         
         # Информация о каналах
-        channels_table = Table(title="Выбранные каналы", box=box.ROUNDED)
-        channels_table.add_column("Канал", style="green")
-        channels_table.add_column("Последняя проверка", style="blue")
-        channels_table.add_column("Сообщений", style="yellow", justify="right")
-        channels_table.add_column("Объем файлов", style="cyan", justify="right")
+        channels_table = self._create_scrollable_channels_table()
         
-        for channel in self.channels:
-            last_check = channel.last_check or "Никогда"
-            
-            # Вычисляем объем скачанных медиафайлов для канала
-            channel_size = self._calculate_channel_media_size(channel)
-            
-            # Форматируем размер файлов с улучшенной точностью
-            if channel_size > 0:
-                if channel_size >= 1024:
-                    # Гигабайты
-                    size_str = f"{channel_size/1024:.2f} ГБ"
-                elif channel_size >= 1:
-                    # Мегабайты
-                    size_str = f"{channel_size:.1f} МБ"
-                else:
-                    # Килобайты для небольших размеров
-                    size_kb = channel_size * 1024
-                    size_str = f"{size_kb:.0f} КБ"
-            else:
-                size_str = "—"
-            
-            channels_table.add_row(
-                channel.title[:30] + "..." if len(channel.title) > 30 else channel.title,
-                last_check,
-                str(channel.total_messages),
-                size_str
-            )
-        
-        layout["left"].update(Panel(channels_table))
+        layout["left"].update(Panel(channels_table, title="Выбранные каналы", box=box.ROUNDED))
         
         # Статистика
         stats_text = Text()
@@ -889,6 +865,65 @@ class TelegramExporter:
         else:
             self.console.print("[ярко-красный]Неверный выбор[/ярко-красный]")
             return None
+    
+    def _start_key_listener(self):
+        """Запуск потока для отслеживания клавиш"""
+        if self.key_thread and self.key_thread.is_alive():
+            return
+        
+        self.key_thread_running = True
+        self.key_thread = threading.Thread(target=self._key_listener, daemon=True)
+        self.key_thread.start()
+    
+    def _stop_key_listener(self):
+        """Остановка потока отслеживания клавиш"""
+        self.key_thread_running = False
+    
+    def _key_listener(self):
+        """Поток для отслеживания клавиш в Windows"""
+        try:
+            import msvcrt
+            while self.key_thread_running and self.running:
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+                    if key == b'\xe0':  # Специальные клавиши
+                        key = msvcrt.getch()
+                        if key == b'H':  # Стрелка вверх
+                            self.key_queue.put('up')
+                        elif key == b'P':  # Стрелка вниз
+                            self.key_queue.put('down')
+                    elif key.lower() == b'e':
+                        self.key_queue.put('export')
+                    elif key == b'\x03':  # Ctrl+C
+                        self.key_queue.put('quit')
+                time.sleep(0.1)
+        except ImportError:
+            # Не Windows, отключаем обработку клавиш
+            pass
+        except Exception:
+            pass
+    
+    def _process_key_input(self):
+        """Обработка нажатий клавиш"""
+        try:
+            while not self.key_queue.empty():
+                key = self.key_queue.get_nowait()
+                if key == 'up':
+                    self.scroll_channels_up()
+                elif key == 'down':
+                    self.scroll_channels_down()
+                elif key == 'export':
+                    self._stop_key_listener()
+                    try:
+                        self.configure_export_types()
+                    finally:
+                        self._start_key_listener()
+                elif key == 'quit':
+                    self.running = False
+                    return True
+        except queue.Empty:
+            pass
+        return False
     
     async def _process_single_message(self, message: Message, channel: ChannelInfo, media_downloader) -> Optional[MessageData]:
         """Обработка одного сообщения с учетом типа экспорта"""
@@ -1535,7 +1570,10 @@ class TelegramExporter:
             """.strip()
     
     async def main_loop(self):
-        """Основной цикл программы"""
+        """Основной цикл программы с обработкой клавиш"""
+        # Запускаем отслеживание клавиш
+        self._start_key_listener()
+        
         try:
             with Live(self.create_status_display(), refresh_per_second=1) as live:
                 # Запуск планировщика в фоне
@@ -1543,14 +1581,22 @@ class TelegramExporter:
                 
                 # Основной цикл
                 while self.running:
+                    # Обрабатываем клавиши
+                    if self._process_key_input():
+                        break
+                    
+                    # Обновляем интерфейс
                     live.update(self.create_status_display())
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(0.5)
                     
         except KeyboardInterrupt:
             self.console.print("\n[yellow]Получен сигнал завершения...[/yellow]")
             self.running = False
             
         finally:
+            # Останавливаем отслеживание клавиш
+            self._stop_key_listener()
+            
             if self.client:
                 await self.client.disconnect()
     
