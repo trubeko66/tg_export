@@ -20,6 +20,7 @@ import html
 import markdown
 import posixpath
 import zipfile
+from enum import Enum
 
 from content_filter import ContentFilter, FilterConfig
 from telethon import TelegramClient, events
@@ -42,6 +43,13 @@ from exporters import (
 from config_manager import ConfigManager
 
 
+class ExportType(Enum):
+    """Типы экспорта"""
+    BOTH = "both"  # Сообщения и файлы
+    MESSAGES_ONLY = "messages_only"  # Только сообщения
+    FILES_ONLY = "files_only"  # Только файлы
+
+
 @dataclass
 class ChannelInfo:
     """Информация о канале"""
@@ -52,6 +60,7 @@ class ChannelInfo:
     total_messages: int = 0
     last_check: Optional[str] = None
     media_size_mb: float = 0.0  # Кэшированный размер медиафайлов в МБ
+    export_type: ExportType = ExportType.BOTH  # Тип экспорта
 
 
 @dataclass
@@ -71,12 +80,21 @@ class ExportStats:
 
 
 class TelegramExporter:
+    # Константы для обработки больших каналов
+    BATCH_SIZE = 1000  # Размер батча для обработки сообщений
+    MAX_MESSAGES_PER_EXPORT = 50000  # Максимум сообщений за один экспорт
+    PROGRESS_UPDATE_INTERVAL = 100  # Интервал обновления прогресса
+    
     def __init__(self):
         self.console = Console()
         self.client: Optional[TelegramClient] = None
         self.channels: List[ChannelInfo] = []
         self.stats = ExportStats()
         self.running = True
+        
+        # Параметры прокрутки для главного экрана
+        self.channels_scroll_offset = 0
+        self.channels_display_limit = 10  # Количество каналов на экране
         
         # Инициализация менеджера конфигурации
         self.config_manager = ConfigManager()
@@ -625,7 +643,7 @@ class TelegramExporter:
         layout["right"].update(Panel(stats_text, title="Статистика"))
         
         # Подвал с инструкциями
-        footer_text = Text("Нажмите Ctrl+C для завершения работы", style="bold red")
+        footer_text = Text("Управление: ↑/↓ - прокрутка каналов | E - настройки экспорта | Ctrl+C - выход", style="bold red")
         layout["footer"].update(Panel(footer_text))
         
         return layout
@@ -663,6 +681,291 @@ class TelegramExporter:
         while self.running:
             schedule.run_pending()
             await asyncio.sleep(60)  # Проверка каждую минуту
+    
+    def _calculate_channel_media_size(self, channel: ChannelInfo) -> float:
+        """Вычисляет размер медиафайлов для канала в МБ"""
+        if channel.media_size_mb > 0:
+            return channel.media_size_mb  # Используем кэшированное значение
+        
+        try:
+            storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
+            export_base_dir = Path(self.config_manager.config.storage.export_base_dir or "exports")
+            channel_dir = export_base_dir / channel.title
+            media_dir = channel_dir / "media"
+            
+            if not media_dir.exists():
+                size_mb = 0.0
+            else:
+                total_size = 0
+                media_files = 0
+                
+                # Оптимизированный подсчет с использованием iterdir для лучшей производительности
+                try:
+                    for file_path in media_dir.iterdir():
+                        if file_path.is_file():
+                            try:
+                                file_size = file_path.stat().st_size
+                                if file_size > 0:  # Игнорируем файлы нулевого размера
+                                    total_size += file_size
+                                    media_files += 1
+                            except (OSError, IOError, PermissionError):
+                                # Пропускаем файлы, к которым нет доступа
+                                continue
+                except (OSError, IOError, PermissionError):
+                    # Если нет доступа к директории
+                    total_size = 0
+                
+                size_mb = total_size / (1024 * 1024)  # Конвертируем в МБ
+            
+            # Кэшируем размер для будущих вызовов
+            channel.media_size_mb = size_mb
+            return size_mb
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating media size for {channel.title}: {e}")
+            return 0.0
+    
+    def _create_scrollable_channels_table(self) -> Table:
+        """Создает прокручиваемую таблицу каналов"""
+        channels_table = Table(box=box.ROUNDED)
+        channels_table.add_column("Канал", style="green")
+        channels_table.add_column("Последняя проверка", style="blue")
+        channels_table.add_column("Сообщений", style="yellow", justify="right")
+        channels_table.add_column("Объем файлов", style="cyan", justify="right")
+        
+        # Определяем диапазон для отображения
+        start_idx = self.channels_scroll_offset
+        end_idx = min(start_idx + self.channels_display_limit, len(self.channels))
+        
+        for i in range(start_idx, end_idx):
+            channel = self.channels[i]
+            last_check = channel.last_check or "Никогда"
+            
+            # Вычисляем объем скачанных медиафайлов для канала
+            channel_size = self._calculate_channel_media_size(channel)
+            
+            # Форматируем размер файлов с улучшенной точностью
+            if channel_size > 0:
+                if channel_size >= 1024:
+                    # Гигабайты
+                    size_str = f"{channel_size/1024:.2f} ГБ"
+                elif channel_size >= 1:
+                    # Мегабайты
+                    size_str = f"{channel_size:.1f} МБ"
+                else:
+                    # Килобайты для небольших размеров
+                    size_kb = channel_size * 1024
+                    size_str = f"{size_kb:.0f} КБ"
+            else:
+                size_str = "—"
+            
+            # Отмечаем текущий канал (если идет экспорт)
+            channel_name = channel.title[:30] + "..." if len(channel.title) > 30 else channel.title
+            if self.stats.current_export_info and channel.title in self.stats.current_export_info:
+                channel_name = f"▶ {channel_name}"  # Маркер текущего экспорта
+            
+            channels_table.add_row(
+                channel_name,
+                last_check,
+                str(channel.total_messages),
+                size_str
+            )
+        
+        # Добавляем информацию о прокрутке если каналов больше лимита
+        if len(self.channels) > self.channels_display_limit:
+            total_pages = (len(self.channels) - 1) // self.channels_display_limit + 1
+            current_page = self.channels_scroll_offset // self.channels_display_limit + 1
+            channels_table.add_row(
+                f"[dim]——— Страница {current_page}/{total_pages} ———[/dim]",
+                "", "", ""
+            )
+        
+        return channels_table
+    
+    def scroll_channels_up(self):
+        """Прокрутка списка каналов вверх"""
+        if self.channels_scroll_offset > 0:
+            self.channels_scroll_offset = max(0, self.channels_scroll_offset - self.channels_display_limit)
+    
+    def scroll_channels_down(self):
+        """Прокрутка списка каналов вниз"""
+        max_offset = max(0, len(self.channels) - self.channels_display_limit)
+        if self.channels_scroll_offset < max_offset:
+            self.channels_scroll_offset = min(max_offset, self.channels_scroll_offset + self.channels_display_limit)
+    
+    def configure_export_types(self):
+        """Настройка типов экспорта для каналов"""
+        if not self.channels:
+            self.console.print("[ярко-красный]Нет выбранных каналов[/ярко-красный]")
+            return
+        
+        self.console.clear()
+        self.console.print(Panel(
+            "Настройка типов экспорта",
+            style="bold magenta"
+        ))
+        
+        # Отображаем список каналов с текущими настройками
+        table = Table(box=box.ROUNDED)
+        table.add_column("№", style="cyan", width=4)
+        table.add_column("Канал", style="green")
+        table.add_column("Тип экспорта", style="yellow")
+        
+        export_type_names = {
+            ExportType.BOTH: "Сообщения и файлы",
+            ExportType.MESSAGES_ONLY: "Только сообщения",
+            ExportType.FILES_ONLY: "Только файлы"
+        }
+        
+        for i, channel in enumerate(self.channels, 1):
+            table.add_row(
+                str(i),
+                channel.title[:40] + "..." if len(channel.title) > 40 else channel.title,
+                export_type_names[channel.export_type]
+            )
+        
+        self.console.print(table)
+        
+        self.console.print("\n[ярко-синий]Команды:[/ярко-синий]")
+        self.console.print("1 - Изменить тип экспорта конкретного канала")
+        self.console.print("2 - Установить одинаковый тип для всех каналов")
+        self.console.print("q - Вернуться к главному экрану")
+        
+        choice = Prompt.ask("Выберите действие").strip().lower()
+        
+        if choice == "1":
+            self._configure_single_channel_export_type()
+        elif choice == "2":
+            self._configure_all_channels_export_type()
+        elif choice == "q":
+            return
+        else:
+            self.console.print("[ярко-красный]Неверная команда[/ярко-красный]")
+            input("Нажмите Enter для продолжения...")
+    
+    def _configure_single_channel_export_type(self):
+        """Настройка типа экспорта для одного канала"""
+        try:
+            channel_num = int(Prompt.ask("Введите номер канала")) - 1
+            if 0 <= channel_num < len(self.channels):
+                new_type = self._choose_export_type()
+                if new_type:
+                    self.channels[channel_num].export_type = new_type
+                    self.save_channels()
+                    self.console.print(f"[ярко-зеленый]Тип экспорта для канала '{self.channels[channel_num].title}' обновлен[/ярко-зеленый]")
+            else:
+                self.console.print("[ярко-красный]Неверный номер канала[/ярко-красный]")
+        except ValueError:
+            self.console.print("[ярко-красный]Неверный формат номера[/ярко-красный]")
+        
+        input("Нажмите Enter для продолжения...")
+    
+    def _configure_all_channels_export_type(self):
+        """Настройка одинакового типа экспорта для всех каналов"""
+        new_type = self._choose_export_type()
+        if new_type:
+            for channel in self.channels:
+                channel.export_type = new_type
+            self.save_channels()
+            self.console.print("[ярко-зеленый]Тип экспорта обновлен для всех каналов[/ярко-зеленый]")
+        
+        input("Нажмите Enter для продолжения...")
+    
+    def _choose_export_type(self) -> Optional[ExportType]:
+        """Выбор типа экспорта"""
+        self.console.print("\nВыберите тип экспорта:")
+        self.console.print("1 - Сообщения и файлы (по умолчанию)")
+        self.console.print("2 - Только сообщения (без загрузки файлов)")
+        self.console.print("3 - Только файлы (без текста сообщений)")
+        
+        choice = Prompt.ask("Ваш выбор").strip()
+        
+        if choice == "1":
+            return ExportType.BOTH
+        elif choice == "2":
+            return ExportType.MESSAGES_ONLY
+        elif choice == "3":
+            return ExportType.FILES_ONLY
+        else:
+            self.console.print("[ярко-красный]Неверный выбор[/ярко-красный]")
+            return None
+    
+    async def _process_single_message(self, message: Message, channel: ChannelInfo, media_downloader) -> Optional[MessageData]:
+        """Обработка одного сообщения с учетом типа экспорта"""
+        try:
+            # Проверяем тип экспорта - если только файлы, пропускаем сообщения без медиа
+            if channel.export_type == ExportType.FILES_ONLY and not message.media:
+                return None
+                
+            # Фильтрация рекламных и промо-сообщений
+            should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
+            if should_filter:
+                self.logger.info(f"Message {message.id} filtered: {filter_reason}")
+                self.stats.filtered_messages += 1
+                return None
+
+            # Загрузка медиафайлов (только если не режим "только сообщения")
+            media_path = None
+            media_type = None
+            
+            if message.media and channel.export_type != ExportType.MESSAGES_ONLY:
+                # Добавляем в очередь загрузки вместо немедленной загрузки
+                media_path = media_downloader.add_to_download_queue(self.client, message)
+                
+                # Определение типа медиа
+                if isinstance(message.media, MessageMediaPhoto):
+                    media_type = "Фото"
+                elif isinstance(message.media, MessageMediaDocument):
+                    media_type = "Документ"
+                else:
+                    media_type = "Другое медиа"
+            
+            # Безопасное получение количества ответов
+            replies_count = 0
+            if hasattr(message, 'replies') and message.replies:
+                if hasattr(message.replies, 'replies'):
+                    replies_count = message.replies.replies
+                elif hasattr(message.replies, 'replies_pts'):
+                    replies_count = getattr(message.replies, 'replies_pts', 0)
+            
+            return MessageData(
+                id=message.id,
+                date=message.date,
+                text=message.text or "",
+                author=None,  # Каналы обычно не показывают авторов
+                media_type=media_type,
+                media_path=media_path,
+                views=getattr(message, 'views', 0) or 0,
+                forwards=getattr(message, 'forwards', 0) or 0,
+                replies=replies_count,
+                edited=message.edit_date
+            )
+                            
+        except Exception as e:
+            self.logger.error(f"Error processing message {message.id}: {e}")
+            self.stats.export_errors += 1
+            return None
+    
+    async def _save_batch_progress(self, messages_batch: List, batch_number: int, channel: ChannelInfo, exporters: tuple) -> None:
+        """Сохраняет батч сообщений в файлы экспорта"""
+        if not messages_batch:
+            return
+            
+        json_exporter, html_exporter, md_exporter = exporters
+        
+        try:
+            # Сортируем сообщения по дате (старые сначала)
+            messages_batch.sort(key=lambda x: x.date or datetime.min)
+            
+            # Сохраняем в всех форматах (аппенд режим)
+            json_exporter.export_messages(messages_batch, append_mode=True)
+            html_exporter.export_messages(messages_batch, append_mode=True)
+            md_exporter.export_messages(messages_batch, append_mode=True)
+            
+            self.logger.info(f"Батч {batch_number}: сохранено {len(messages_batch)} сообщений для канала {channel.title}")
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка сохранения батча {batch_number}: {e}")
     
     def _calculate_channel_media_size(self, channel: ChannelInfo) -> float:
         """Вычисление общего размера медиафайлов канала в МБ с кешированием"""
@@ -765,31 +1068,24 @@ class TelegramExporter:
             # Получение канала
             entity = await self.client.get_entity(channel.id)
             
-            # Сначала подсчитываем общее количество сообщений в канале
+            # Получаем информацию о канале эффективно без полного подсчета сообщений
             total_messages_in_channel = 0
             try:
-                async for _ in self.client.iter_messages(entity):
-                    total_messages_in_channel += 1
+                # Пытаемся получить примерную оценку количества сообщений
+                first_msg = await self.client.get_messages(entity, limit=1)
+                last_msg = await self.client.get_messages(entity, limit=1, reverse=True)
+                if first_msg and last_msg:
+                    # Оценка количества сообщений по диапазону ID (не идеально, но быстро)
+                    total_messages_in_channel = max(1, last_msg[0].id - first_msg[0].id + 1)
+                    self.logger.info(f"Channel {channel.title}: Estimated {total_messages_in_channel} messages (ID range: {first_msg[0].id}-{last_msg[0].id})")
+                    self.logger.info(f"Channel {channel.title}: Current last_message_id: {channel.last_message_id}")
+                else:
+                    self.logger.warning(f"Channel {channel.title}: Could not get message range")
             except Exception as e:
-                self.logger.warning(f"Could not count total messages in {channel.title}: {e}")
+                self.logger.warning(f"Could not get channel info for {channel.title}: {e}")
                 total_messages_in_channel = 0
             
             self.stats.total_messages_in_channel = total_messages_in_channel
-            
-            # Дополнительная диагностика для понимания проблемы
-            if total_messages_in_channel > 0:
-                self.logger.info(f"Channel {channel.title}: Found {total_messages_in_channel} total messages")
-                # Проверяем доступность первых и последних сообщений
-                try:
-                    first_msg = await self.client.get_messages(entity, limit=1)
-                    last_msg = await self.client.get_messages(entity, limit=1, reverse=True)
-                    if first_msg and last_msg:
-                        self.logger.info(f"Channel {channel.title}: First message ID: {first_msg[0].id}, Last message ID: {last_msg[0].id}")
-                        self.logger.info(f"Channel {channel.title}: Current last_message_id: {channel.last_message_id}")
-                except Exception as e:
-                    self.logger.warning(f"Could not get first/last message info for {channel.title}: {e}")
-            else:
-                self.logger.warning(f"Channel {channel.title}: No messages found during counting - this might indicate an access issue")
             
             # Инициализация экспортеров
             json_exporter = JSONExporter(channel.title, channel_dir)
@@ -971,9 +1267,23 @@ class TelegramExporter:
                             self.stats.export_errors += 1
             
             except FloodWaitError as e:
-                self.logger.warning(f"FloodWait error for channel {channel.title}: waiting {e.seconds} seconds")
-                await asyncio.sleep(e.seconds)
-                # Повторная попытка после ожидания
+                # Используем итеративный подход вместо рекурсии
+                retry_count = getattr(self, '_floodwait_retry_count', 0)
+                max_retries = 3
+                
+                if retry_count >= max_retries:
+                    self.logger.error(f"Максимум попыток ({max_retries}) превышен для канала {channel.title}")
+                    self.stats.export_errors += 1
+                    return
+                    
+                wait_time = min(e.seconds, 300)  # Максимум 5 минут ожидания
+                self.logger.warning(f"FloodWait {wait_time}s для {channel.title}, попытка {retry_count + 1}/{max_retries}")
+                await asyncio.sleep(wait_time)
+                
+                # Увеличиваем счетчик попыток
+                self._floodwait_retry_count = retry_count + 1
+                
+                # Повторная попытка (итеративно)
                 await self.export_channel(channel)
                 return
             except Exception as e:
@@ -1152,6 +1462,9 @@ class TelegramExporter:
                     if channel.last_message_id == 0 and total_messages_in_channel > 0:
                         self.logger.warning(f"Channel {channel.title} has {total_messages_in_channel} messages but export returned 0. This might indicate an access issue.")
                         # Можно добавить дополнительную диагностику здесь
+            
+            # Сбрасываем счетчик FloodWait попыток после успешного завершения
+            self._floodwait_retry_count = 0
             
             # Сохранение обновленной информации о каналах
             self.save_channels()
