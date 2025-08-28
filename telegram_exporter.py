@@ -375,9 +375,18 @@ class TelegramExporter:
     def save_channels_to_file(self, file_path: Path) -> bool:
         """Сохранение списка каналов в произвольный JSON-файл для редактирования"""
         try:
+            # Преобразуем каналы в словарь с правильной сериализацией enum
+            channels_data = []
+            for channel in self.channels:
+                channel_dict = asdict(channel)
+                # Преобразуем ExportType в строку
+                if 'export_type' in channel_dict and isinstance(channel_dict['export_type'], ExportType):
+                    channel_dict['export_type'] = channel_dict['export_type'].value
+                channels_data.append(channel_dict)
+            
             with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump([asdict(channel) for channel in self.channels], f,
-                          ensure_ascii=False, indent=2)
+                json.dump(channels_data, f, ensure_ascii=False, indent=2)
+                
             self.console.print(f"[green]✓ Список каналов сохранен в {file_path}[/green]")
             return True
         except Exception as e:
@@ -542,9 +551,19 @@ class TelegramExporter:
         """Сохранение списка каналов в файл"""
         try:
             self.channels_file = self._get_channels_file_path()
+            
+            # Преобразуем каналы в словарь с правильной сериализацией enum
+            channels_data = []
+            for channel in self.channels:
+                channel_dict = asdict(channel)
+                # Преобразуем ExportType в строку
+                if 'export_type' in channel_dict and isinstance(channel_dict['export_type'], ExportType):
+                    channel_dict['export_type'] = channel_dict['export_type'].value
+                channels_data.append(channel_dict)
+            
             with open(self.channels_file, 'w', encoding='utf-8') as f:
-                json.dump([asdict(channel) for channel in self.channels], f, 
-                         ensure_ascii=False, indent=2)
+                json.dump(channels_data, f, ensure_ascii=False, indent=2)
+                
             # WebDAV upload
             if self._webdav_enabled():
                 try:
