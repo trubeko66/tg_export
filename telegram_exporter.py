@@ -1065,7 +1065,15 @@ class TelegramExporter:
         # Текущий экспорт
         if self.stats.current_export_info:
             stats_text.append("⚡ Текущий экспорт\n\n", style="bold green")
-            stats_text.append(f"{self.stats.current_export_info}\n\n", style="green")
+            
+            # Извлекаем название канала без дополнительной информации
+            export_info = self.stats.current_export_info
+            if " | " in export_info:
+                channel_name = export_info.split(" | ")[0]
+            else:
+                channel_name = export_info
+            
+            stats_text.append(f"{channel_name}\n", style="green")
             
             # Прогресс экспорта
             if self.stats.total_messages_in_channel > 0:
@@ -1078,8 +1086,11 @@ class TelegramExporter:
             if self.stats.download_speed_mb_per_sec > 0:
                 stats_text.append(f"Скорость: {self.stats.download_speed_mb_per_sec:.1f} МБ/с\n", style="blue")
             
+            # Осталось файлов - отображаем только если больше 0
             if self.stats.remaining_files_to_download > 0:
-                stats_text.append(f"Осталось файлов: {self.stats.remaining_files_to_download}\n", style="yellow")
+                stats_text.append(f"Осталось: {self.stats.remaining_files_to_download}\n", style="yellow")
+            
+            stats_text.append("\n")  # Добавляем пустую строку после блока
         
         # Последний экспорт
         if self.stats.last_export_time:
@@ -1881,9 +1892,8 @@ class TelegramExporter:
                     self.stats.download_speed_files_per_sec = float(progress.get('files_per_sec', 0.0))
                     self.stats.download_speed_mb_per_sec = float(progress.get('mb_per_sec', 0.0))
                     self.stats.remaining_files_to_download = int(progress.get('remaining', 0))
-                    # Обновим информационную строку
-                    if self.stats.current_export_info:
-                        self.stats.current_export_info += f" | Осталось файлов: {self.stats.remaining_files_to_download}"
+                    # Убираем строку, которая дописывала информацию - 
+                    # это уже обрабатывается в _create_detailed_statistics с правильным форматированием
                 except Exception:
                     pass
             media_downloader.progress_callback = _on_progress
