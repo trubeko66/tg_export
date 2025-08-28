@@ -889,6 +889,10 @@ class TelegramExporter:
             if len(channel_name) > 35:  # Увеличиваем допустимую длину
                 channel_name = channel_name[:32] + "..."
             
+            # Форматирование количества сообщений (полное число без сокращений)
+            msg_count = channel.total_messages
+            msg_str = str(msg_count)
+            
             # Подсвечиваем текущий экспортируемый канал с ярким выделением
             if actual_index == current_channel_index:
                 status = "[bold yellow on red]⚡ ЭКСПОРТ[/bold yellow on red]"
