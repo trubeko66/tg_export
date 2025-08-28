@@ -793,30 +793,11 @@ class TelegramExporter:
         stats_content = self._create_detailed_statistics()
         layout["main"]["right"].update(Panel(stats_content, title="Статистика", box=box.ROUNDED))
         
-        # Также добавляем возможность запуска экспорта при первом старте
-        # если каналы не проверялись больше суток
-        if self.channels:
-            need_initial_export = False
-            for channel in self.channels:
-                if not channel.last_check:
-                    need_initial_export = True
-                    break
-                try:
-                    last_check = datetime.strptime(channel.last_check, "%Y-%m-%d %H:%M:%S")
-                    if (datetime.now() - last_check).days >= 1:
-                        need_initial_export = True
-                        break
-                except:
-                    need_initial_export = True
-                    break
-            
-            if need_initial_export:
-                self.logger.info("Starting initial export for channels that haven't been checked recently")
-                asyncio.create_task(self.export_all_channels())
+        # Добавляем информацию о подвале
+        footer_content = self._create_footer_info()
+        layout["footer"].update(Panel(footer_content, box=box.ROUNDED))
         
-        while self.running:
-            schedule.run_pending()
-            await asyncio.sleep(60)  # Проверка каждую минуту
+        return layout
     
     def _calculate_channel_media_size(self, channel: ChannelInfo) -> float:
         """Вычисляет размер медиафайлов для канала в МБ"""
@@ -1026,6 +1007,30 @@ class TelegramExporter:
             stats_text.append(f"{self.stats.last_export_time}\n", style="blue")
         
         return stats_text
+
+    async def _post_loading_menu(self):
+        """Меню дополнительных действий после загрузки каналов"""
+        self.console.print(Panel(
+            "Каналы загружены и готовы к работе. Доступны дополнительные действия:\n"
+            "- [i]reexport[/i] — переэкспортировать сообщения с перезаписью файлов\n"
+            "- [i]config[/i] — настроить типы экспорта каналов\n"
+            "- [i]start[/i] — запустить мониторинг (по умолчанию)",
+            title="Дополнительные действия", box=box.ROUNDED
+        ))
+        
+        action = Prompt.ask("Выберите действие", choices=["reexport", "config", "start"], default="start")
+        
+        if action == "reexport":
+            await self._handle_reexport_channels()
+        elif action == "config":
+            self.configure_export_types()
+        # Для "start" продолжаем выполнение
+    
+    async def run_scheduler(self):
+        """Запуск планировщика задач"""
+        while self.running:
+            schedule.run_pending()
+            await asyncio.sleep(60)  # Проверка каждую минуту
 
     def _create_footer_info(self) -> Text:
         """Создает информацию для подвала с инструкциями"""
@@ -2416,6 +2421,26 @@ class TelegramExporter:
     async def main_loop(self):
         """Упрощенный основной цикл программы без управления клавишами"""
         try:
+            # Проверяем, нужен ли начальный экспорт
+            if self.channels:
+                need_initial_export = False
+                for channel in self.channels:
+                    if not channel.last_check:
+                        need_initial_export = True
+                        break
+                    try:
+                        last_check = datetime.strptime(channel.last_check, "%Y-%m-%d %H:%M:%S")
+                        if (datetime.now() - last_check).days >= 1:
+                            need_initial_export = True
+                            break
+                    except:
+                        need_initial_export = True
+                        break
+                
+                if need_initial_export:
+                    self.logger.info("Starting initial export for channels that haven't been checked recently")
+                    asyncio.create_task(self.export_all_channels())
+            
             with Live(self.create_status_display(), refresh_per_second=2) as live:
                 # Запуск планировщика в фоне
                 scheduler_task = asyncio.create_task(self.run_scheduler())
@@ -2459,11 +2484,10 @@ class TelegramExporter:
                 "- [i]import[/i] — загрузить из JSON-файла\n"
                 "- [i]export[/i] — сохранить текущий список в JSON\n"
                 "- [i]reset[/i] — сбросить состояние экспорта для проблемных каналов\n"
-                "- [i]reexport[/i] — переэкспортировать сообщения с перезаписью файлов\n"
                 "- [i]skip[/i] — пропустить",
                 title="Импорт/Экспорт каналов", box=box.ROUNDED
             ))
-            io_action = Prompt.ask("Действие", choices=["import", "export", "reset", "reexport", "skip"], default="skip")
+            io_action = Prompt.ask("Действие", choices=["import", "export", "reset", "skip"], default="skip")
             if io_action == "import":
                 # Перед импортом попробуем подтянуть актуальный файл с WebDAV
                 if self._webdav_enabled():
@@ -2502,9 +2526,6 @@ class TelegramExporter:
                         self.console.print("[green]✓ Состояние экспорта сброшено. При следующем запуске каналы будут экспортированы заново.[/green]")
                 else:
                     self.console.print("[green]Проблемных каналов не найдено[/green]")
-            elif io_action == "reexport":
-                # Переэкспорт сообщений каналов с перезаписью
-                await self._handle_reexport_channels()
         except Exception as e:
             self.logger.error(f"IO setup error: {e}")
 
@@ -2557,6 +2578,9 @@ class TelegramExporter:
         
         if integrity_issues == 0 and integrity_fixed == 0:
             self.console.print("[green]✓ Все экспорты актуальны[/green]")
+        
+        # Меню дополнительных действий после загрузки каналов
+        await self._post_loading_menu()
         
         # Запуск основного цикла
         await self.main_loop()
