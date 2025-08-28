@@ -806,9 +806,9 @@ class TelegramExporter:
             header_text.append(f" | {self.stats.current_export_info}", style="yellow")
         layout["header"].update(Panel(header_text, box=box.DOUBLE))
         
-        # Главная область - разделена на левую и правую панели (равная ширина)
+        # Главная область - разделена на левую и правую панели (2:1)
         layout["main"].split_row(
-            Layout(name="left", ratio=1),
+            Layout(name="left", ratio=2),
             Layout(name="right", ratio=1)
         )
         
@@ -932,7 +932,7 @@ class TelegramExporter:
         channels_table = Table(box=box.ROUNDED, show_header=True, header_style="bold white", expand=True)
         channels_table.add_column("Канал", style="green", no_wrap=False, ratio=3)
         channels_table.add_column("Проверка", style="blue", no_wrap=True, ratio=2)
-        channels_table.add_column("Мсг", style="yellow", justify="right", no_wrap=True, ratio=1)
+        channels_table.add_column("Сообщений", style="yellow", justify="right", no_wrap=True, ratio=1)
         channels_table.add_column("Статус", style="white", no_wrap=True, ratio=2)
         
         if not self.channels:
@@ -942,11 +942,42 @@ class TelegramExporter:
             )
             return channels_table
         
-        # Показываем все каналы или ограниченное количество для производительности
-        max_visible_channels = 20  # Увеличиваем количество отображаемых каналов
-        display_channels = self.channels[:max_visible_channels]
+        # Определяем текущий экспортируемый канал
+        current_export_channel_title = None
+        if self.stats.current_export_info:
+            # Извлекаем название канала из строки вида "Экспорт: Название канала"
+            parts = self.stats.current_export_info.split(": ", 1)
+            if len(parts) > 1:
+                # Очищаем от дополнительной информации
+                channel_part = parts[1].split(" | ")[0]  # Берем только название канала
+                current_export_channel_title = channel_part.strip()
         
-        for channel in display_channels:
+        # Находим индекс текущего канала
+        current_channel_index = -1
+        if current_export_channel_title:
+            for i, channel in enumerate(self.channels):
+                if channel.title == current_export_channel_title:
+                    current_channel_index = i
+                    break
+        
+        # Определяем диапазон отображения для автоматической прокрутки
+        max_visible_channels = 15
+        start_index = 0
+        
+        if current_channel_index >= 0:
+            # Центрируем текущий канал в списке
+            half_window = max_visible_channels // 2
+            start_index = max(0, current_channel_index - half_window)
+            
+            # Корректируем, чтобы не выходить за границы
+            if start_index + max_visible_channels > len(self.channels):
+                start_index = max(0, len(self.channels) - max_visible_channels)
+        
+        end_index = min(start_index + max_visible_channels, len(self.channels))
+        display_channels = self.channels[start_index:end_index]
+        
+        for i, channel in enumerate(display_channels):
+            actual_index = start_index + i
             last_check = channel.last_check or "Никогда"
             
             # Определяем статус канала
@@ -956,7 +987,8 @@ class TelegramExporter:
             if len(channel_name) > 35:  # Увеличиваем допустимую длину
                 channel_name = channel_name[:32] + "..."
             
-            if self.stats.current_export_info and channel.title in self.stats.current_export_info:
+            # Подсвечиваем текущий экспортируемый канал
+            if actual_index == current_channel_index:
                 status = "[green]⚡ Экспорт[/green]"
                 channel_name = f"[bold green]▶ {channel_name}[/bold green]"
             elif channel.last_check:
@@ -990,10 +1022,17 @@ class TelegramExporter:
                 status
             )
         
-        # Информация о скрытых каналах
+        # Информация о позиции в списке
         if len(self.channels) > max_visible_channels:
+            total_channels = len(self.channels)
+            showing_range = f"{start_index + 1}-{end_index}"
+            info_text = f"[dim]Показано {showing_range} из {total_channels} каналов[/dim]"
+            
+            if current_channel_index >= 0:
+                info_text += f" | [green]Текущий: #{current_channel_index + 1}[/green]"
+            
             channels_table.add_row(
-                f"[dim]...еще {len(self.channels) - max_visible_channels} каналов[/dim]",
+                info_text,
                 "", "", ""
             )
         
@@ -1045,17 +1084,14 @@ class TelegramExporter:
         """Меню дополнительных действий после загрузки каналов"""
         self.console.print(Panel(
             "Каналы загружены и готовы к работе. Доступны дополнительные действия:\n"
-            "- [i]reexport[/i] — переэкспортировать сообщения с перезаписью файлов\n"
             "- [i]config[/i] — настроить типы экспорта каналов\n"
             "- [i]start[/i] — запустить мониторинг (по умолчанию)",
             title="Дополнительные действия", box=box.ROUNDED
         ))
         
-        action = Prompt.ask("Выберите действие", choices=["reexport", "config", "start"], default="start")
+        action = Prompt.ask("Выберите действие", choices=["config", "start"], default="start")
         
-        if action == "reexport":
-            await self._handle_reexport_channels()
-        elif action == "config":
+        if action == "config":
             self.configure_export_types()
         # Для "start" продолжаем выполнение
     
@@ -2515,6 +2551,9 @@ class TelegramExporter:
                 if need_initial_export:
                     self.logger.info("Starting initial export for channels that haven't been checked recently")
                     asyncio.create_task(self.export_all_channels())
+                
+                # Проверяем наличие MD файлов для всех каналов
+                self._check_missing_md_files()
             
             with Live(self.create_status_display(), refresh_per_second=2) as live:
                 # Запуск планировщика в фоне
@@ -2533,6 +2572,57 @@ class TelegramExporter:
         finally:
             if self.client:
                 await self.client.disconnect()
+    
+    def _check_missing_md_files(self):
+        """Проверяет наличие MD файлов и запускает экспорт при их отсутствии"""
+        try:
+            # Получаем базовый каталог экспорта
+            try:
+                storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
+                base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
+            except Exception:
+                base_dir = 'exports'
+            
+            base_path = Path(base_dir)
+            channels_needing_export = []
+            
+            for channel in self.channels:
+                sanitized_title = self._sanitize_channel_filename(channel.title)
+                channel_dir = base_path / sanitized_title
+                md_file = channel_dir / f"{sanitized_title}.md"
+                
+                if not md_file.exists():
+                    self.logger.info(f"MD файл отсутствует для канала: {channel.title}")
+                    channels_needing_export.append(channel)
+            
+            if channels_needing_export:
+                self.logger.info(f"Найдено {len(channels_needing_export)} каналов без MD файлов, запуск экспорта")
+                
+                # Запускаем экспорт для каналов без MD файлов
+                asyncio.create_task(self._export_missing_md_channels(channels_needing_export))
+                
+        except Exception as e:
+            self.logger.error(f"Ошибка проверки MD файлов: {e}")
+    
+    async def _export_missing_md_channels(self, channels: List[ChannelInfo]):
+        """Экспорт каналов без MD файлов"""
+        try:
+            for channel in channels:
+                self.logger.info(f"Запуск экспорта для канала без MD файла: {channel.title}")
+                
+                # Сбрасываем last_message_id чтобы загрузить все сообщения
+                original_last_id = channel.last_message_id
+                channel.last_message_id = 0
+                
+                try:
+                    await self.export_channel(channel)
+                    self.logger.info(f"Успешно экспортирован канал: {channel.title}")
+                except Exception as e:
+                    self.logger.error(f"Ошибка экспорта канала {channel.title}: {e}")
+                    # Восстанавливаем оригинальное значение при ошибке
+                    channel.last_message_id = original_last_id
+        except Exception as e:
+            self.logger.error(f"Ошибка экспорта каналов без MD файлов: {e}")
     
     async def run(self):
         """Главный метод запуска программы"""
