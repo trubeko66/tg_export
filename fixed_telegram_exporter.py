@@ -820,6 +820,8 @@ class TelegramExporter:
     def create_status_display(self) -> Layout:
         """Создание отображения статуса с двумя панелями"""
         layout = Layout()
+        
+        # Убираем фиксированные header и footer - таблица займёт всё доступное пространство
         layout.split_row(
             Layout(name="left", ratio=2),   # Левая панель (список каналов) - 2/3 ширины
             Layout(name="right", ratio=1)   # Правая панель (статистика) - 1/3 ширины
@@ -827,11 +829,18 @@ class TelegramExporter:
         
         # Создаем таблицу каналов для левой панели
         channels_table = self._create_detailed_channels_table()
-        layout["left"].update(Panel(channels_table, title="Каналы", border_style="blue"))
+        
+        # Заголовок с текущим статусом
+        title_text = "📡 Каналы"
+        if self.stats.current_export_info:
+            title_text += f" | {self.stats.current_export_info}"
+        
+        layout["left"].update(Panel(channels_table, title=title_text, border_style="blue"))
         
         # Создаем статистику для правой панели
         stats_text = self._create_detailed_statistics()
-        layout["right"].update(Panel(stats_text, title="Статистика", border_style="green"))
+        stats_title = "📊 Статистика | Статус: Работает"
+        layout["right"].update(Panel(stats_text, title=stats_title, border_style="green"))
         
         return layout
 
@@ -876,7 +885,7 @@ class TelegramExporter:
                     break
         
         # Определяем диапазон отображения для автоматической прокрутки
-        max_visible_channels = 25  # Увеличиваем для лучшего использования вертикального пространства
+        max_visible_channels = 50  # Значительно увеличиваем для использования всего вертикального пространства
         start_index = 0
         
         if current_channel_index >= 0:
@@ -902,10 +911,12 @@ class TelegramExporter:
             if len(channel_name) > 35:  # Увеличиваем допустимую длину
                 channel_name = channel_name[:32] + "..."
             
-            # Подсвечиваем текущий экспортируемый канал
+            # Подсвечиваем текущий экспортируемый канал с ярким выделением
             if actual_index == current_channel_index:
-                status = "[green]⚡ Экспорт[/green]"
-                channel_name = f"[bold green]▶ {channel_name}[/bold green]"
+                status = "[bold yellow on red]⚡ ЭКСПОРТ[/bold yellow on red]"
+                channel_name = f"[bold white on blue]▶ {channel_name}[/bold white on blue]"
+                last_check = f"[bold white on blue]{last_check}[/bold white on blue]"
+                msg_str = f"[bold white on blue]{msg_str}[/bold white on blue]"
             elif channel.last_check:
                 status = "[blue]✓ Готов[/blue]"
             else:
@@ -923,7 +934,8 @@ class TelegramExporter:
             
             # Форматирование количества сообщений (полное число без сокращений)
             msg_count = channel.total_messages
-            msg_str = str(msg_count)
+            if actual_index != current_channel_index:  # Не перезаписываем уже отформатированное
+                msg_str = str(msg_count)
             
             channels_table.add_row(
                 channel_name,
@@ -939,7 +951,7 @@ class TelegramExporter:
             info_text = f"[dim]Показано {showing_range} из {total_channels} каналов[/dim]"
             
             if current_channel_index >= 0:
-                info_text += f" | [green]Текущий: #{current_channel_index + 1}[/green]"
+                info_text += f" | [bold green on black]⚡ Текущий: #{current_channel_index + 1}[/bold green on black]"
             
             channels_table.add_row(
                 info_text,
