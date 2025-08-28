@@ -272,14 +272,103 @@ class TelegramExporter:
     # ===== Работа с файлами каналов =====
     def load_channels_from_file(self, file_path: Path) -> bool:
         """Загрузка списка каналов из произвольного JSON-файла"""
+        if not file_path.exists():
+            self.logger.error(f"Файл не найден: {file_path}")
+            self.console.print(f"[red]Файл не найден: {file_path}[/red]")
+            return False
+            
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            # Ожидается список объектов ChannelInfo
-            self.channels = [ChannelInfo(**item) for item in data]
+                content = f.read().strip()
+                
+            if not content:
+                self.logger.error(f"Файл пуст: {file_path}")
+                self.console.print(f"[red]Файл пуст: {file_path}[/red]")
+                return False
+                
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Ошибка формата JSON в файле {file_path}: {e}")
+                self.console.print(f"[red]Ошибка формата JSON в файле {file_path}:[/red]")
+                self.console.print(f"[red]Строка {e.lineno}, позиция {e.colno}: {e.msg}[/red]")
+                
+                # Показываем проблемный фрагмент
+                try:
+                    lines = content.split('\n')
+                    if e.lineno <= len(lines):
+                        problem_line = lines[e.lineno - 1]
+                        self.console.print(f"[yellow]Проблемная строка: {problem_line}[/yellow]")
+                        if e.colno > 0 and e.colno <= len(problem_line):
+                            pointer = ' ' * (e.colno - 1) + '^'
+                            self.console.print(f"[yellow]{pointer}[/yellow]")
+                except Exception:
+                    pass
+                    
+                return False
+                
+            if not isinstance(data, list):
+                self.logger.error(f"Неверный формат данных в файле {file_path}: ожидался список, получен {type(data)}")
+                self.console.print(f"[red]Неверный формат файла: ожидался список каналов, получен {type(data).__name__}[/red]")
+                return False
+                
+            # Конвертируем данные в ChannelInfo с проверкой полей
+            valid_channels = []
+            errors = []
+            
+            for i, item in enumerate(data):
+                if not isinstance(item, dict):
+                    errors.append(f"Элемент {i + 1}: не является объектом (получен {type(item).__name__})")
+                    continue
+                    
+                # Проверяем обязательные поля
+                required_fields = ['id', 'title']
+                missing_fields = [field for field in required_fields if field not in item or item[field] is None]
+                if missing_fields:
+                    errors.append(f"Элемент {i + 1} ('{item.get('title', 'без названия')}'): отсутствуют поля {missing_fields}")
+                    continue
+                    
+                try:
+                    # Приводим export_type к правильному типу если нужно
+                    if 'export_type' in item:
+                        export_type_value = item['export_type']
+                        if isinstance(export_type_value, str):
+                            try:
+                                item['export_type'] = ExportType(export_type_value)
+                            except ValueError:
+                                item['export_type'] = ExportType.BOTH
+                                errors.append(f"Элемент {i + 1}: неизвестный тип экспорта '{export_type_value}', используется BOTH")
+                    else:
+                        item['export_type'] = ExportType.BOTH
+                        
+                    channel = ChannelInfo(**item)
+                    valid_channels.append(channel)
+                    
+                except Exception as e:
+                    errors.append(f"Элемент {i + 1}: ошибка создания объекта канала - {e}")
+                    continue
+                    
+            # Показываем результаты
+            if errors:
+                self.console.print(f"[yellow]Найдены проблемы при загрузке:[/yellow]")
+                for error in errors:
+                    self.console.print(f"[yellow]  • {error}[/yellow]")
+                    
+            if not valid_channels:
+                self.console.print(f"[red]Не удалось загрузить ни одного валидного канала из файла[/red]")
+                return False
+                
+            self.channels = valid_channels
+            success_msg = f"Успешно загружено {len(valid_channels)} каналов"
+            if len(valid_channels) != len(data):
+                success_msg += f" из {len(data)} (пропущено {len(data) - len(valid_channels)})")
+                
+            self.console.print(f"[green]{success_msg}[/green]")
+            self.logger.info(f"Loaded {len(valid_channels)} channels from {file_path}")
             return True
+            
         except Exception as e:
-            self.logger.error(f"Error loading channels from {file_path}: {e}")
+            self.logger.error(f"Общая ошибка загрузки из файла {file_path}: {e}")
             self.console.print(f"[red]Ошибка загрузки из файла {file_path}: {e}[/red]")
             return False
 
@@ -356,15 +445,98 @@ class TelegramExporter:
     def load_channels(self) -> bool:
         """Загрузка списка каналов из файла"""
         self.channels_file = self._get_channels_file_path()
-        if self.channels_file.exists():
+        if not self.channels_file.exists():
+            self.logger.info(f"Файл каналов не найден: {self.channels_file}")
+            return False
+            
+        try:
+            with open(self.channels_file, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                
+            if not content:
+                self.logger.warning(f"Файл каналов пуст: {self.channels_file}")
+                self.console.print(f"[yellow]Файл каналов пуст: {self.channels_file}[/yellow]")
+                return False
+                
             try:
-                with open(self.channels_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self.channels = [ChannelInfo(**item) for item in data]
-                return True
-            except Exception as e:
-                self.logger.error(f"Error loading channels: {e}")
-        return False
+                data = json.loads(content)
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Ошибка формата JSON в файле {self.channels_file}: {e}")
+                self.console.print(f"[red]Ошибка формата JSON в файле каналов:[/red]")
+                self.console.print(f"[red]Строка {e.lineno}, позиция {e.colno}: {e.msg}[/red]")
+                
+                # Предлагаем пользователю исправить файл
+                if Confirm.ask("Создать новый пустой файл каналов?", default=True):
+                    try:
+                        with open(self.channels_file, 'w', encoding='utf-8') as f:
+                            json.dump([], f, ensure_ascii=False, indent=2)
+                        self.console.print(f"[green]Создан новый пустой файл: {self.channels_file}[/green]")
+                        self.channels = []
+                        return True
+                    except Exception as write_error:
+                        self.logger.error(f"Ошибка создания нового файла: {write_error}")
+                        self.console.print(f"[red]Ошибка создания файла: {write_error}[/red]")
+                return False
+                
+            if not isinstance(data, list):
+                self.logger.error(f"Неверный формат данных в файле каналов: ожидался список, получен {type(data)}")
+                self.console.print(f"[red]Неверный формат файла каналов: ожидался список каналов[/red]")
+                return False
+                
+            # Конвертируем данные в ChannelInfo с проверкой полей
+            valid_channels = []
+            for i, item in enumerate(data):
+                if not isinstance(item, dict):
+                    self.logger.warning(f"Пропуск элемента {i}: не является объектом")
+                    continue
+                    
+                # Проверяем обязательные поля
+                required_fields = ['id', 'title']
+                missing_fields = [field for field in required_fields if field not in item]
+                if missing_fields:
+                    self.logger.warning(f"Пропуск канала {i}: отсутствуют поля {missing_fields}")
+                    continue
+                    
+                try:
+                    # Приводим export_type к правильному типу если нужно
+                    if 'export_type' in item:
+                        export_type_value = item['export_type']
+                        if isinstance(export_type_value, str):
+                            # Пытаемся найти соответствующий enum
+                            try:
+                                item['export_type'] = ExportType(export_type_value)
+                            except ValueError:
+                                # Если не найден, используем значение по умолчанию
+                                item['export_type'] = ExportType.BOTH
+                                self.logger.warning(f"Неизвестный тип экспорта '{export_type_value}' для канала {item.get('title', 'unknown')}, используется BOTH")
+                    else:
+                        item['export_type'] = ExportType.BOTH
+                        
+                    channel = ChannelInfo(**item)
+                    valid_channels.append(channel)
+                except Exception as e:
+                    self.logger.warning(f"Ошибка создания ChannelInfo для элемента {i}: {e}")
+                    continue
+                    
+            self.channels = valid_channels
+            
+            if len(valid_channels) != len(data):
+                invalid_count = len(data) - len(valid_channels)
+                self.console.print(f"[yellow]Пропущено {invalid_count} некорректных записей из файла каналов[/yellow]")
+                
+                # Сохраняем исправленную версию
+                if valid_channels:
+                    self.save_channels()
+                    self.console.print(f"[green]Файл каналов исправлен и сохранен[/green]")
+                    
+            self.console.print(f"[green]Успешно загружено {len(valid_channels)} каналов[/green]")
+            self.logger.info(f"Loaded {len(valid_channels)} channels from {self.channels_file}")
+            return len(valid_channels) > 0
+            
+        except Exception as e:
+            self.logger.error(f"Общая ошибка загрузки каналов: {e}")
+            self.console.print(f"[red]Ошибка загрузки файла каналов: {e}[/red]")
+            return False
     
     def save_channels(self):
         """Сохранение списка каналов в файл"""
@@ -1537,6 +1709,239 @@ class TelegramExporter:
                 problematic_channels.append(channel.title)
         return problematic_channels
     
+    async def verify_and_complete_export(self, channel: ChannelInfo) -> bool:
+        """Проверяет целостность экспорта канала и докачивает недостающие сообщения"""
+        try:
+            self.logger.info(f"Проверка целостности экспорта для канала: {channel.title}")
+            
+            # Получаем путь к директории канала
+            try:
+                storage_cfg = self.config_manager.config.storage
+                base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
+            except Exception:
+                base_dir = 'exports'
+            
+            base_path = Path(base_dir)
+            channel_dir = base_path / channel.title.replace('/', '_').replace('\\', '_')
+            
+            # Проверяем существование JSON файла экспорта
+            json_file = channel_dir / f"{channel.title.replace('/', '_').replace('\\', '_')}.json"
+            if not json_file.exists():
+                self.logger.info(f"JSON файл не найден для {channel.title}, требуется полный экспорт")
+                return False
+            
+            # Читаем существующий экспорт
+            try:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    export_data = json.load(f)
+                
+                if not isinstance(export_data, list):
+                    self.logger.warning(f"Неверный формат JSON файла для {channel.title}")
+                    return False
+                
+                # Извлекаем ID сообщений из экспорта
+                exported_ids = set()
+                for msg in export_data:
+                    if isinstance(msg, dict) and 'id' in msg:
+                        exported_ids.add(msg['id'])
+                
+                self.logger.info(f"Найдено {len(exported_ids)} сообщений в существующем экспорте")
+                
+            except Exception as e:
+                self.logger.error(f"Ошибка чтения JSON файла для {channel.title}: {e}")
+                return False
+            
+            # Получаем актуальный диапазон сообщений в канале
+            try:
+                entity = await self.client.get_entity(channel.id)
+                
+                # Получаем первое и последнее сообщения для определения диапазона
+                first_msg = await self.client.get_messages(entity, limit=1, reverse=True)
+                last_msg = await self.client.get_messages(entity, limit=1)
+                
+                if not first_msg or not last_msg:
+                    self.logger.warning(f"Не удалось получить сообщения из канала {channel.title}")
+                    return True  # Считаем что все в порядке если канал пустой
+                
+                first_id = first_msg[0].id
+                last_id = last_msg[0].id
+                
+                self.logger.info(f"Диапазон сообщений в канале {channel.title}: {first_id}-{last_id}")
+                
+                # Определяем недостающие сообщения
+                missing_ids = []
+                
+                # 1. Новые сообщения после последнего экспортированного
+                max_exported_id = max(exported_ids) if exported_ids else 0
+                if last_id > max_exported_id:
+                    # Получаем новые сообщения
+                    async for message in self.client.iter_messages(entity, min_id=max_exported_id, limit=None):
+                        if message.id not in exported_ids:
+                            missing_ids.append(message.id)
+                
+                # 2. Пропуски в середине диапазона
+                # Проверяем наличие значительных пропусков (более 10 подряд отсутствующих ID)
+                if exported_ids:
+                    min_exported_id = min(exported_ids)
+                    
+                    # Создаем список всех ID в диапазоне от min до max экспортированных
+                    expected_range = set(range(min_exported_id, max_exported_id + 1))
+                    gaps_in_range = expected_range - exported_ids
+                    
+                    # Фильтруем значительные пропуски (где отсутствует более 5 сообщений подряд)
+                    significant_gaps = []
+                    if gaps_in_range:
+                        sorted_gaps = sorted(gaps_in_range)
+                        current_gap = [sorted_gaps[0]]
+                        
+                        for i in range(1, len(sorted_gaps)):
+                            if sorted_gaps[i] == sorted_gaps[i-1] + 1:
+                                current_gap.append(sorted_gaps[i])
+                            else:
+                                if len(current_gap) >= 5:  # Значительный пропуск
+                                    significant_gaps.extend(current_gap)
+                                current_gap = [sorted_gaps[i]]
+                        
+                        # Не забываем последний пропуск
+                        if len(current_gap) >= 5:
+                            significant_gaps.extend(current_gap)
+                    
+                    # Проверяем, существуют ли эти сообщения в канале
+                    for gap_id in significant_gaps:
+                        try:
+                            msg = await self.client.get_messages(entity, ids=gap_id)
+                            if msg and msg[0] and gap_id not in exported_ids:
+                                missing_ids.append(gap_id)
+                        except Exception:
+                            # Сообщение не существует, игнорируем
+                            pass
+                
+                missing_ids = sorted(set(missing_ids))
+                
+                if not missing_ids:
+                    self.logger.info(f"Экспорт канала {channel.title} полный, недостающих сообщений не найдено")
+                    return True
+                
+                self.logger.info(f"Найдено {len(missing_ids)} недостающих сообщений в канале {channel.title}")
+                
+                # Получаем недостающие сообщения
+                missing_messages = []
+                
+                # Используем батчевое получение для эффективности
+                batch_size = 100
+                for i in range(0, len(missing_ids), batch_size):
+                    batch_ids = missing_ids[i:i + batch_size]
+                    try:
+                        messages = await self.client.get_messages(entity, ids=batch_ids)
+                        for message in messages:
+                            if message and message.id:
+                                # Обрабатываем сообщение также как в основном экспорте
+                                msg_data = await self._process_single_message(message, channel, None)
+                                if msg_data:
+                                    missing_messages.append(msg_data)
+                    
+                    except Exception as e:
+                        self.logger.error(f"Ошибка получения батча сообщений {batch_ids}: {e}")
+                        # Пробуем получить по одному
+                        for msg_id in batch_ids:
+                            try:
+                                msg = await self.client.get_messages(entity, ids=msg_id)
+                                if msg and msg[0] and msg[0].id:
+                                    msg_data = await self._process_single_message(msg[0], channel, None)
+                                    if msg_data:
+                                        missing_messages.append(msg_data)
+                            except Exception:
+                                continue
+                
+                if not missing_messages:
+                    self.logger.info(f"Недостающие сообщения не удалось получить для {channel.title}")
+                    return True
+                
+                self.logger.info(f"Получено {len(missing_messages)} недостающих сообщений для {channel.title}")
+                
+                # Добавляем недостающие сообщения к существующему экспорту
+                # Объединяем с существующими данными
+                combined_messages = list(export_data)
+                
+                for msg_data in missing_messages:
+                    # Преобразуем MessageData в словарь для добавления в JSON
+                    msg_dict = {
+                        'id': msg_data.id,
+                        'date': msg_data.date.isoformat() if msg_data.date else None,
+                        'text': msg_data.text,
+                        'author': msg_data.author,
+                        'media_type': msg_data.media_type,
+                        'media_path': msg_data.media_path,
+                        'views': msg_data.views,
+                        'forwards': msg_data.forwards,
+                        'replies': msg_data.replies,
+                        'edited': msg_data.edited.isoformat() if msg_data.edited else None
+                    }
+                    combined_messages.append(msg_dict)
+                
+                # Сортируем все сообщения по ID
+                combined_messages.sort(key=lambda x: x.get('id', 0))
+                
+                # Убираем дубликаты по ID
+                seen_ids = set()
+                unique_messages = []
+                for msg in combined_messages:
+                    msg_id = msg.get('id')
+                    if msg_id and msg_id not in seen_ids:
+                        seen_ids.add(msg_id)
+                        unique_messages.append(msg)
+                
+                # Сохраняем обновленный экспорт
+                with open(json_file, 'w', encoding='utf-8') as f:
+                    json.dump(unique_messages, f, ensure_ascii=False, indent=2)
+                
+                self.logger.info(f"Целостность экспорта восстановлена для {channel.title}: добавлено {len(missing_messages)} сообщений")
+                
+                # Обновляем также HTML и Markdown файлы
+                try:
+                    # Преобразуем обратно в MessageData для экспортеров
+                    updated_messages = []
+                    for msg_dict in unique_messages:
+                        msg_data = MessageData(
+                            id=msg_dict.get('id', 0),
+                            date=datetime.fromisoformat(msg_dict['date']) if msg_dict.get('date') else None,
+                            text=msg_dict.get('text', ''),
+                            author=msg_dict.get('author'),
+                            media_type=msg_dict.get('media_type'),
+                            media_path=msg_dict.get('media_path'),
+                            views=msg_dict.get('views', 0),
+                            forwards=msg_dict.get('forwards', 0),
+                            replies=msg_dict.get('replies', 0),
+                            edited=datetime.fromisoformat(msg_dict['edited']) if msg_dict.get('edited') else None
+                        )
+                        updated_messages.append(msg_data)
+                    
+                    # Обновляем HTML и Markdown файлы
+                    html_exporter = HTMLExporter(channel.title, channel_dir)
+                    md_exporter = MarkdownExporter(channel.title, channel_dir)
+                    
+                    html_exporter.export_messages(updated_messages, append_mode=False)  # Перезаписываем полностью
+                    md_exporter.export_messages(updated_messages, append_mode=False)  # Перезаписываем полностью
+                    
+                    self.logger.info(f"Обновлены HTML и Markdown файлы для {channel.title}")
+                    
+                except Exception as e:
+                    self.logger.error(f"Ошибка обновления HTML/Markdown файлов для {channel.title}: {e}")
+                
+                # Обновляем статистику канала
+                channel.last_message_id = max(last_id, channel.last_message_id)
+                channel.total_messages = len(unique_messages)
+                
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"Ошибка проверки целостности для {channel.title}: {e}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Общая ошибка проверки целостности для {channel.title}: {e}")
+            return False
+    
     def _create_notification(self, channel: ChannelInfo, messages_count: int, success: bool, error: str = None) -> str:
         """Создание текста уведомления"""
         if success and messages_count > 0:
@@ -1687,6 +2092,38 @@ class TelegramExporter:
         
         # Обновление статистики
         self.stats.total_channels = len(self.channels)
+        
+        # Проверка целостности экспорта при запуске
+        self.console.print("[yellow]Проверка целостности экспортов...[/yellow]")
+        integrity_issues = 0
+        integrity_fixed = 0
+        
+        for channel in self.channels:
+            try:
+                self.console.print(f"Проверка канала: {channel.title}")
+                result = await self.verify_and_complete_export(channel)
+                if result:
+                    integrity_fixed += 1
+                else:
+                    integrity_issues += 1
+            except Exception as e:
+                self.logger.error(f"Ошибка проверки целостности для {channel.title}: {e}")
+                integrity_issues += 1
+        
+        # Сохраняем обновленную информацию о каналах после проверки целостности
+        self.save_channels()
+        
+        if integrity_fixed > 0:
+            self.console.print(f"[green]✓ Целостность восстановлена для {integrity_fixed} каналов[/green]")
+            # Отправляем уведомление о восстановлении
+            notification = f"📋 Проверка целостности завершена\n✅ Восстановлено: {integrity_fixed} каналов\n❌ Проблемы: {integrity_issues} каналов"
+            await self.send_notification(notification)
+        
+        if integrity_issues > 0:
+            self.console.print(f"[yellow]⚠ Проблемы с целостностью у {integrity_issues} каналов (см. лог)[/yellow]")
+        
+        if integrity_issues == 0 and integrity_fixed == 0:
+            self.console.print("[green]✓ Все экспорты актуальны[/green]")
         
         # Запуск основного цикла
         await self.main_loop()
