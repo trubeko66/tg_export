@@ -1,0 +1,32 @@
+{
+  "telegram": {
+    "api_id": "",
+    "api_hash": "",
+    "phone": "c"
+  },
+  "bot": {
+    "bot_token": null,
+    "chat_id": null,
+    "enabled": false
+  },
+  "first_run": false,
+  "storage": {
+    "channels_path": ".channels",
+    "export_base_dir": "exports",
+    "media_download_threads": 4,
+    "adaptive_download": true,
+    "min_download_delay": 0.1,
+    "max_download_delay": 3.0
+  },
+  "webdav": {
+    "enabled": false,
+    "url": null,
+    "username": null,
+    "password": null,
+    "remote_path": "/channels/.channels",
+    "auto_sync": false,
+    "notify_on_sync": true,
+    "upload_archives": false,
+    "archives_remote_dir": "/channels/archives"
+  }
+}

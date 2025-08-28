@@ -763,13 +763,13 @@ class TelegramExporter:
             self.logger.error(f"Channel selection error: {e}")
     
     def create_status_display(self) -> Layout:
-        """Создание упрощенного статусного экрана с полноэкранным списком каналов"""
+        """Создание информативного статусного экрана с двумя панелями"""
         layout = Layout()
         
         layout.split_column(
             Layout(name="header", size=3),
             Layout(name="main"),
-            Layout(name="footer", size=2)
+            Layout(name="footer", size=3)
         )
         
         # Заголовок
@@ -779,19 +779,23 @@ class TelegramExporter:
             header_text.append(f" | {self.stats.current_export_info}", style="yellow")
         layout["header"].update(Panel(header_text, box=box.DOUBLE))
         
-        # Главная область - полноэкранный список каналов с дополнительной информацией
-        channels_table = self._create_fullscreen_channels_table()
-        layout["main"].update(Panel(channels_table, title="Мониторинг каналов", box=box.ROUNDED))
+        # Главная область - разделена на левую и правую панели
+        layout["main"].split_row(
+            Layout(name="left", ratio=2),
+            Layout(name="right", ratio=1)
+        )
         
-        # Упрощенный подвал только со статистикой
-        footer_text = Text()
-        footer_text.append(f"Каналов: {self.stats.total_channels} | ", style="cyan")
-        footer_text.append(f"Сообщений: {self.stats.total_messages} | ", style="green")
-        footer_text.append(f"Данных: {self.stats.total_size_mb:.1f} МБ | ", style="yellow")
-        footer_text.append(f"Ошибок: {self.stats.export_errors}", style="red")
-        if self.stats.filtered_messages > 0:
-            footer_text.append(f" | Отфильтровано: {self.stats.filtered_messages}", style="magenta")
-        layout["footer"].update(Panel(footer_text))
+        # Левая панель - список каналов
+        channels_table = self._create_detailed_channels_table()
+        layout["main"]["left"].update(Panel(channels_table, title="Мониторинг каналов", box=box.ROUNDED))
+        
+        # Правая панель - детальная статистика
+        stats_content = self._create_detailed_statistics()
+        layout["main"]["right"].update(Panel(stats_content, title="Статистика", box=box.ROUNDED))
+        
+        # Подвал с инструкциями и дополнительной информацией
+        footer_content = self._create_footer_info()
+        layout["footer"].update(Panel(footer_content, title="Управление", box=box.ROUNDED))
         
         return layout
     
@@ -929,113 +933,117 @@ class TelegramExporter:
         
         return channels_table
     
-    def _create_fullscreen_channels_table(self) -> Table:
-        """Создает полноэкранную таблицу каналов с автопрокруткой"""
+    def _create_detailed_channels_table(self) -> Table:
+        """Создает детальную таблицу каналов для левой панели"""
         channels_table = Table(box=box.ROUNDED)
-        channels_table.add_column("Канал", style="green", width=40)
-        channels_table.add_column("Последняя проверка", style="blue", width=20)
-        channels_table.add_column("Сообщений", style="yellow", justify="right", width=10)
-        channels_table.add_column("Объем файлов", style="cyan", justify="right", width=12)
-        channels_table.add_column("Тип экспорта", style="magenta", width=15)
-        channels_table.add_column("Статус", style="white", width=20)
+        channels_table.add_column("Канал", style="green")
+        channels_table.add_column("Последняя проверка", style="blue")
+        channels_table.add_column("Сообщений", style="yellow", justify="right")
+        channels_table.add_column("Статус", style="white")
         
         if not self.channels:
             channels_table.add_row(
                 "[dim]Каналы не выбраны[/dim]",
-                "", "", "", "", ""
+                "", "", ""
             )
             return channels_table
         
-        # Автопрокрутка к текущему экспортируемому каналу
-        current_export_channel_idx = -1
-        if self.stats.current_export_info:
-            for i, channel in enumerate(self.channels):
-                if channel.title in self.stats.current_export_info:
-                    current_export_channel_idx = i
-                    break
+        # Показываем все каналы или ограниченное количество
+        display_channels = self.channels[:15]  # Показываем первые 15 каналов
         
-        # Определяем диапазон для отображения (больше элементов на экране)
-        self.channels_display_limit = 20  # Увеличиваем лимит для полноэкранного режима
-        
-        # Автоматическая прокрутка к текущему экспортируемому каналу
-        if current_export_channel_idx >= 0:
-            # Убеждаемся, что текущий канал виден на экране
-            if current_export_channel_idx < self.channels_scroll_offset:
-                self.channels_scroll_offset = max(0, current_export_channel_idx - 2)
-            elif current_export_channel_idx >= self.channels_scroll_offset + self.channels_display_limit:
-                self.channels_scroll_offset = min(
-                    len(self.channels) - self.channels_display_limit,
-                    current_export_channel_idx - self.channels_display_limit + 3
-                )
-        
-        start_idx = self.channels_scroll_offset
-        end_idx = min(start_idx + self.channels_display_limit, len(self.channels))
-        
-        export_type_names = {
-            ExportType.BOTH: "Все",
-            ExportType.MESSAGES_ONLY: "Сообщения",
-            ExportType.FILES_ONLY: "Файлы"
-        }
-        
-        for i in range(start_idx, end_idx):
-            channel = self.channels[i]
+        for channel in display_channels:
             last_check = channel.last_check or "Никогда"
-            
-            # Вычисляем объем скачанных медиафайлов для канала
-            channel_size = self._calculate_channel_media_size(channel)
-            
-            # Форматируем размер файлов
-            if channel_size > 0:
-                if channel_size >= 1024:
-                    size_str = f"{channel_size/1024:.2f} ГБ"
-                elif channel_size >= 1:
-                    size_str = f"{channel_size:.1f} МБ"
-                else:
-                    size_kb = channel_size * 1024
-                    size_str = f"{size_kb:.0f} КБ"
-            else:
-                size_str = "—"
             
             # Определяем статус канала
             status = "Ожидание"
-            channel_name = channel.title[:35] + "..." if len(channel.title) > 35 else channel.title
+            channel_name = channel.title[:25] + "..." if len(channel.title) > 25 else channel.title
             
             if self.stats.current_export_info and channel.title in self.stats.current_export_info:
-                status = "[green]⚡ Экспорт...[/green]"
+                status = "[green]⚡ Экспорт[/green]"
                 channel_name = f"[bold green]▶ {channel_name}[/bold green]"
             elif channel.last_check:
-                status = "[blue]✓ Завершен[/blue]"
+                status = "[blue]✓ Готов[/blue]"
             else:
                 status = "[dim]⏳ Ожидание[/dim]"
             
             # Форматируем дату последней проверки
             if last_check != "Никогда":
                 try:
-                    # Пробуем сократить дату
                     dt = datetime.strptime(last_check, "%Y-%m-%d %H:%M:%S")
                     last_check = dt.strftime("%d.%m %H:%M")
                 except:
-                    last_check = last_check[:16] if len(last_check) > 16 else last_check
+                    last_check = last_check[:11] if len(last_check) > 11 else last_check
             
             channels_table.add_row(
                 channel_name,
                 last_check,
                 str(channel.total_messages),
-                size_str,
-                export_type_names[channel.export_type],
                 status
             )
         
-        # Добавляем информацию о прокрутке если каналов больше лимита
-        if len(self.channels) > self.channels_display_limit:
-            total_pages = (len(self.channels) - 1) // self.channels_display_limit + 1
-            current_page = self.channels_scroll_offset // self.channels_display_limit + 1
+        # Добавляем информацию о количестве каналов если их больше отображаемых
+        if len(self.channels) > 15:
             channels_table.add_row(
-                f"[dim]——— Показано {end_idx - start_idx} из {len(self.channels)} каналов (стр. {current_page}/{total_pages}) ———[/dim]",
-                "", "", "", "", ""
+                f"[dim]... и еще {len(self.channels) - 15} каналов[/dim]",
+                "", "", ""
             )
         
         return channels_table
+
+    def _create_detailed_statistics(self) -> Text:
+        """Создает детальную статистику для правой панели"""
+        stats_text = Text()
+        
+        # Основная статистика
+        stats_text.append("📊 Общая статистика\n\n", style="bold cyan")
+        stats_text.append(f"Каналов: {self.stats.total_channels}\n", style="green")
+        stats_text.append(f"Сообщений: {self.stats.total_messages}\n", style="yellow")
+        stats_text.append(f"Данных: {self.stats.total_size_mb:.1f} МБ\n", style="cyan")
+        stats_text.append(f"Ошибок: {self.stats.export_errors}\n\n", style="red")
+        
+        # Статистика фильтрации
+        if self.stats.filtered_messages > 0:
+            stats_text.append("🔍 Фильтрация\n\n", style="bold magenta")
+            stats_text.append(f"Отфильтровано: {self.stats.filtered_messages}\n\n", style="magenta")
+        
+        # Текущий экспорт
+        if self.stats.current_export_info:
+            stats_text.append("⚡ Текущий экспорт\n\n", style="bold green")
+            stats_text.append(f"{self.stats.current_export_info}\n\n", style="green")
+            
+            # Прогресс экспорта
+            if self.stats.total_messages_in_channel > 0:
+                stats_text.append(f"Сообщений в канале: {self.stats.total_messages_in_channel}\n", style="blue")
+            
+            # Скорость загрузки
+            if self.stats.download_speed_files_per_sec > 0:
+                stats_text.append(f"Скорость: {self.stats.download_speed_files_per_sec:.1f} ф/с\n", style="blue")
+            
+            if self.stats.download_speed_mb_per_sec > 0:
+                stats_text.append(f"Скорость: {self.stats.download_speed_mb_per_sec:.1f} МБ/с\n", style="blue")
+            
+            if self.stats.remaining_files_to_download > 0:
+                stats_text.append(f"Осталось файлов: {self.stats.remaining_files_to_download}\n", style="yellow")
+        
+        # Последний экспорт
+        if self.stats.last_export_time:
+            stats_text.append("\n📅 Последний экспорт\n\n", style="bold blue")
+            stats_text.append(f"{self.stats.last_export_time}\n", style="blue")
+        
+        return stats_text
+
+    def _create_footer_info(self) -> Text:
+        """Создает информацию для подвала с инструкциями"""
+        footer_text = Text()
+        
+        footer_text.append("🎮 Управление: ", style="bold white")
+        footer_text.append("Программа работает автоматически\n", style="dim")
+        footer_text.append("🔧 Настройки: ", style="bold white")
+        footer_text.append("Доступны при запуске программы\n", style="dim")
+        footer_text.append("🛑 Остановка: ", style="bold white")
+        footer_text.append("Ctrl+C для завершения работы", style="dim")
+        
+        return footer_text
     
     def scroll_channels_up(self):
         """Прокрутка списка каналов вверх"""
@@ -1271,6 +1279,209 @@ class TelegramExporter:
             self.logger.error(f"Error reexporting {channel.title} to Markdown: {e}")
             raise
     
+    async def _handle_reexport_channels(self):
+        """Обработка переэкспорта сообщений каналов с перезаписью"""
+        if not self.channels:
+            self.console.print("[yellow]Каналы не выбраны. Необходимо сначала выбрать каналы для экспорта.[/yellow]")
+            return
+        
+        self.console.clear()
+        self.console.print(Panel(
+            "Переэкспорт сообщений каналов",
+            style="bold magenta"
+        ))
+        
+        # Отображаем список каналов
+        table = Table(box=box.ROUNDED)
+        table.add_column("№", style="cyan", width=4)
+        table.add_column("Канал", style="green")
+        table.add_column("Сообщений", style="yellow", justify="right")
+        
+        for i, channel in enumerate(self.channels, 1):
+            table.add_row(
+                str(i),
+                channel.title[:50] + "..." if len(channel.title) > 50 else channel.title,
+                str(channel.total_messages)
+            )
+        
+        self.console.print(table)
+        
+        self.console.print("\n[bright_blue]Варианты переэкспорта:[/bright_blue]")
+        self.console.print("1 - Переэкспортировать все каналы в все форматы")
+        self.console.print("2 - Переэкспортировать конкретный канал в все форматы")
+        self.console.print("3 - Переэкспортировать все каналы только в Markdown")
+        self.console.print("4 - Переэкспортировать конкретный канал только в Markdown")
+        self.console.print("q - Вернуться к главному меню")
+        
+        choice = Prompt.ask("Выберите действие").strip().lower()
+        
+        if choice == "1":
+            await self._reexport_all_channels_all_formats()
+        elif choice == "2":
+            await self._reexport_single_channel_all_formats()
+        elif choice == "3":
+            await self._reexport_all_channels_to_markdown()
+        elif choice == "4":
+            await self._reexport_single_channel_to_markdown_from_menu()
+        elif choice == "q":
+            return
+        else:
+            self.console.print("[bright_red]Неверная команда[/bright_red]")
+            input("Нажмите Enter для продолжения...")
+    
+    async def _reexport_all_channels_all_formats(self):
+        """Переэкспорт всех каналов во все форматы"""
+        if not Confirm.ask("Переэкспортировать все каналы в JSON, HTML и Markdown с перезаписью файлов?", default=False):
+            return
+            
+        self.console.print("[green]Запуск полного переэкспорта всех каналов...[/green]")
+        
+        success_count = 0
+        error_count = 0
+        
+        for i, channel in enumerate(self.channels, 1):
+            try:
+                self.console.print(f"[blue]Переэкспорт {i}/{len(self.channels)}: {channel.title}[/blue]")
+                await self._reexport_channel_to_all_formats(channel)
+                success_count += 1
+                self.console.print(f"[green]✓ Завершен: {channel.title}[/green]")
+            except Exception as e:
+                error_count += 1
+                self.logger.error(f"Error reexporting {channel.title} to all formats: {e}")
+                self.console.print(f"[red]✗ Ошибка: {channel.title} - {e}[/red]")
+        
+        self.console.print(f"\n[bold green]Полный переэкспорт завершен![/bold green]")
+        self.console.print(f"Успешно: {success_count}, Ошибок: {error_count}")
+        
+        # Отправляем уведомление
+        notification = f"📋 Полный переэкспорт в все форматы завершен\n✓ Успешно: {success_count}\n✗ Ошибок: {error_count}"
+        await self.send_notification(notification)
+        
+        input("Нажмите Enter для продолжения...")
+    
+    async def _reexport_single_channel_all_formats(self):
+        """Переэкспорт конкретного канала во все форматы"""
+        try:
+            channel_num = int(Prompt.ask("Введите номер канала")) - 1
+            if 0 <= channel_num < len(self.channels):
+                channel = self.channels[channel_num]
+                if Confirm.ask(f"Переэкспортировать '{channel.title}' в JSON, HTML и Markdown с перезаписью файлов?", default=False):
+                    self.console.print(f"[green]Запуск полного переэкспорта: {channel.title}[/green]")
+                    await self._reexport_channel_to_all_formats(channel)
+                    self.console.print(f"[green]✓ Полный переэкспорт завершен: {channel.title}[/green]")
+            else:
+                self.console.print("[bright_red]Неверный номер канала[/bright_red]")
+        except ValueError:
+            self.console.print("[bright_red]Неверный формат номера[/bright_red]")
+        
+        input("Нажмите Enter для продолжения...")
+    
+    async def _reexport_single_channel_to_markdown_from_menu(self):
+        """Переэкспорт конкретного канала в Markdown формат из меню"""
+        try:
+            channel_num = int(Prompt.ask("Введите номер канала")) - 1
+            if 0 <= channel_num < len(self.channels):
+                channel = self.channels[channel_num]
+                if Confirm.ask(f"Переэкспортировать '{channel.title}' в Markdown с перезаписью файла?", default=False):
+                    self.console.print(f"[green]Запуск переэкспорта: {channel.title}[/green]")
+                    await self._reexport_channel_to_markdown(channel)
+                    self.console.print(f"[green]✓ Переэкспорт завершен: {channel.title}[/green]")
+            else:
+                self.console.print("[bright_red]Неверный номер канала[/bright_red]")
+        except ValueError:
+            self.console.print("[bright_red]Неверный формат номера[/bright_red]")
+        
+        input("Нажмите Enter для продолжения...")
+    
+    async def _reexport_channel_to_all_formats(self, channel: ChannelInfo):
+        """Переэкспорт конкретного канала во все форматы"""
+        try:
+            # Получаем путь к директории канала
+            try:
+                storage_cfg = self.config_manager.config.storage
+                base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
+            except Exception:
+                base_dir = 'exports'
+            
+            base_path = Path(base_dir)
+            channel_dir = base_path / channel.title.replace('/', '_').replace('\\', '_')
+            
+            # Проверяем наличие JSON файла с данными
+            json_file = channel_dir / f"{channel.title.replace('/', '_').replace('\\', '_')}.json"
+            
+            if not json_file.exists():
+                raise FileNotFoundError(f"Не найден JSON файл для канала {channel.title}")
+            
+            # Загружаем данные из JSON
+            with open(json_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            if 'messages' not in data or not isinstance(data['messages'], list):
+                raise ValueError(f"Некорректный формат JSON файла для {channel.title}")
+            
+            # Преобразуем данные сообщений в MessageData
+            messages_data = []
+            for msg_dict in data['messages']:
+                try:
+                    # Преобразуем даты
+                    msg_date = None
+                    if msg_dict.get('date'):
+                        msg_date = datetime.fromisoformat(msg_dict['date'].replace('Z', '+00:00'))
+                    
+                    edited_date = None
+                    if msg_dict.get('edited'):
+                        edited_date = datetime.fromisoformat(msg_dict['edited'].replace('Z', '+00:00'))
+                    
+                    msg_data = MessageData(
+                        id=msg_dict.get('id', 0),
+                        date=msg_date,
+                        text=msg_dict.get('text', ''),
+                        author=msg_dict.get('author'),
+                        media_type=msg_dict.get('media_type'),
+                        media_path=msg_dict.get('media_path'),
+                        views=msg_dict.get('views', 0),
+                        forwards=msg_dict.get('forwards', 0),
+                        replies=msg_dict.get('replies', 0),
+                        edited=edited_date
+                    )
+                    messages_data.append(msg_data)
+                except Exception as e:
+                    self.logger.warning(f"Error parsing message data: {e}")
+                    continue
+            
+            if not messages_data:
+                raise ValueError(f"Не удалось загрузить сообщения для {channel.title}")
+            
+            # Экспортируем в JSON (перезаписываем)
+            json_exporter = JSONExporter(channel.title, channel_dir)
+            json_file = json_exporter.export_messages(messages_data, append_mode=False)
+            
+            # Экспортируем в HTML (перезаписываем)
+            html_exporter = HTMLExporter(channel.title, channel_dir)
+            html_file = html_exporter.export_messages(messages_data, append_mode=False)
+            
+            # Экспортируем в Markdown (перезаписываем)
+            md_exporter = MarkdownExporter(channel.title, channel_dir)
+            md_file = md_exporter.export_messages(messages_data, append_mode=False)
+            
+            # Проверяем успешность экспорта
+            files_created = []
+            if json_file and Path(json_file).exists():
+                files_created.append("JSON")
+            if html_file and Path(html_file).exists():
+                files_created.append("HTML")
+            if md_file and Path(md_file).exists():
+                files_created.append("Markdown")
+            
+            if files_created:
+                self.logger.info(f"Successfully reexported {channel.title} to formats: {', '.join(files_created)}")
+            else:
+                raise RuntimeError(f"Не удалось создать файлы экспорта для {channel.title}")
+            
+        except Exception as e:
+            self.logger.error(f"Error reexporting {channel.title} to all formats: {e}")
+            raise
+
     def _start_key_listener(self):
         """Запуск потока для отслеживания клавиш"""
         if self.key_thread and self.key_thread.is_alive():
@@ -2253,10 +2464,11 @@ class TelegramExporter:
                 "- [i]import[/i] — загрузить из JSON-файла\n"
                 "- [i]export[/i] — сохранить текущий список в JSON\n"
                 "- [i]reset[/i] — сбросить состояние экспорта для проблемных каналов\n"
+                "- [i]reexport[/i] — переэкспортировать сообщения с перезаписью файлов\n"
                 "- [i]skip[/i] — пропустить",
                 title="Импорт/Экспорт каналов", box=box.ROUNDED
             ))
-            io_action = Prompt.ask("Действие", choices=["import", "export", "reset", "skip"], default="skip")
+            io_action = Prompt.ask("Действие", choices=["import", "export", "reset", "reexport", "skip"], default="skip")
             if io_action == "import":
                 # Перед импортом попробуем подтянуть актуальный файл с WebDAV
                 if self._webdav_enabled():
@@ -2295,6 +2507,9 @@ class TelegramExporter:
                         self.console.print("[green]✓ Состояние экспорта сброшено. При следующем запуске каналы будут экспортированы заново.[/green]")
                 else:
                     self.console.print("[green]Проблемных каналов не найдено[/green]")
+            elif io_action == "reexport":
+                # Переэкспорт сообщений каналов с перезаписью
+                await self._handle_reexport_channels()
         except Exception as e:
             self.logger.error(f"IO setup error: {e}")
 
