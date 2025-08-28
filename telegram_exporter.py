@@ -779,34 +779,19 @@ class TelegramExporter:
             header_text.append(f" | {self.stats.current_export_info}", style="yellow")
         layout["header"].update(Panel(header_text, box=box.DOUBLE))
         
-        # Главная область - разделена на левую и правую панели
+        # Главная область - разделена на левую и правую панели (равная ширина)
         layout["main"].split_row(
-            Layout(name="left", ratio=2),
+            Layout(name="left", ratio=1),
             Layout(name="right", ratio=1)
         )
         
-        # Левая панель - список каналов
+        # Левая панель - оптимизированная таблица каналов
         channels_table = self._create_detailed_channels_table()
         layout["main"]["left"].update(Panel(channels_table, title="Мониторинг каналов", box=box.ROUNDED))
         
         # Правая панель - детальная статистика
         stats_content = self._create_detailed_statistics()
         layout["main"]["right"].update(Panel(stats_content, title="Статистика", box=box.ROUNDED))
-        
-        # Подвал с инструкциями и дополнительной информацией
-        footer_content = self._create_footer_info()
-        layout["footer"].update(Panel(footer_content, title="Управление", box=box.ROUNDED))
-        
-        return layout
-    
-    async def run_scheduler(self):
-        """Запуск планировщика задач"""
-        def schedule_export():
-            """Функция для планировщика"""
-            if self.running:
-                asyncio.create_task(self.export_all_channels())
-        
-        schedule.every().day.at("00:00").do(schedule_export)
         
         # Также добавляем возможность запуска экспорта при первом старте
         # если каналы не проверялись больше суток
@@ -934,16 +919,16 @@ class TelegramExporter:
         return channels_table
     
     def _create_detailed_channels_table(self) -> Table:
-        """Создает детальную таблицу каналов для левой панели"""
-        channels_table = Table(box=box.ROUNDED)
-        channels_table.add_column("Канал", style="green")
-        channels_table.add_column("Последняя проверка", style="blue")
-        channels_table.add_column("Сообщений", style="yellow", justify="right")
-        channels_table.add_column("Статус", style="white")
+        """Создает оптимизированную таблицу каналов для левой панели"""
+        channels_table = Table(box=box.ROUNDED, show_header=True, header_style="bold white")
+        channels_table.add_column("Канал", style="green", width=20, no_wrap=False)
+        channels_table.add_column("Проверка", style="blue", width=10, no_wrap=True)
+        channels_table.add_column("Мсг", style="yellow", justify="right", width=5, no_wrap=True)
+        channels_table.add_column("Статус", style="white", width=12, no_wrap=True)
         
         if not self.channels:
             channels_table.add_row(
-                "[dim]Каналы не выбраны[/dim]",
+                "[Каналы не выбраны]",
                 "", "", ""
             )
             return channels_table
@@ -956,7 +941,8 @@ class TelegramExporter:
             
             # Определяем статус канала
             status = "Ожидание"
-            channel_name = channel.title[:25] + "..." if len(channel.title) > 25 else channel.title
+            # Сокращаем имя для компактности
+            channel_name = channel.title[:18] + "..." if len(channel.title) > 18 else channel.title
             
             if self.stats.current_export_info and channel.title in self.stats.current_export_info:
                 status = "[green]⚡ Экспорт[/green]"
@@ -964,27 +950,36 @@ class TelegramExporter:
             elif channel.last_check:
                 status = "[blue]✓ Готов[/blue]"
             else:
-                status = "[dim]⏳ Ожидание[/dim]"
+                status = "[dim]⏳ Ожид.[/dim]"
             
-            # Форматируем дату последней проверки
+            # Компактное форматирование даты
             if last_check != "Никогда":
                 try:
                     dt = datetime.strptime(last_check, "%Y-%m-%d %H:%M:%S")
                     last_check = dt.strftime("%d.%m %H:%M")
                 except:
-                    last_check = last_check[:11] if len(last_check) > 11 else last_check
+                    last_check = last_check[:8] if len(last_check) > 8 else last_check
+            else:
+                last_check = "Никогда"
+            
+            # Компактное отображение количества сообщений
+            msg_count = channel.total_messages
+            if msg_count >= 1000:
+                msg_str = f"{msg_count//1000}k"
+            else:
+                msg_str = str(msg_count)
             
             channels_table.add_row(
                 channel_name,
                 last_check,
-                str(channel.total_messages),
+                msg_str,
                 status
             )
         
-        # Добавляем информацию о количестве каналов если их больше отображаемых
+        # Компактное отображение информации о количестве каналов
         if len(self.channels) > 15:
             channels_table.add_row(
-                f"[dim]... и еще {len(self.channels) - 15} каналов[/dim]",
+                f"[dim]...+{len(self.channels) - 15} кан.[/dim]",
                 "", "", ""
             )
         
