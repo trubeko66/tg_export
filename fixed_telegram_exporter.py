@@ -763,72 +763,75 @@ class TelegramExporter:
                                     selected_ids.discard(dlg_id)
                                 else:
                                     selected_ids.add(dlg_id)
-                            else:
-                                ok = False
-                                break
-                    if not ok:
-                        self.console.print("[red]❌ Неверный формат. Используйте числа и диапазоны, например: 1,3-6[/red]")
-                        input("Нажмите Enter для продолжения...")
-                        continue
-            
-            # Финализация выбора
-            if not selected_ids:
-                self.console.print("[yellow]Вы ничего не выбрали[/yellow]")
-                return
-            
-            # Преобразуем выбранные id в объекты ChannelInfo (по оригинальному списку)
-            selected_map = {getattr(d.entity, 'id', None): d for d in all_dialogs}
-            for dlg_id in selected_ids:
-                d = selected_map.get(dlg_id)
-                if d is None:
+  
+                if not ok:
+                    self.console.print("[red]❌ Неверная команда[/red]")
+                    input("Нажмите Enter для продолжения...")
                     continue
-                self.channels.append(ChannelInfo(
-                    id=getattr(d.entity, 'id', 0),
-                    title=d.title,
-                    username=getattr(d.entity, 'username', None)
-                ))
             
-            self.save_channels()
-            self.console.print(f"[green]✓ Выбрано {len(self.channels)} каналов[/green]")
-        
+            # Сохраняем выбранные каналы
+            new_channels = []
+            for dialog in all_dialogs:
+                if getattr(dialog.entity, 'id', None) in selected_ids:
+                    channel_info = ChannelInfo(
+                        id=getattr(dialog.entity, 'id', 0),
+                        title=dialog.title,
+                        username=getattr(dialog.entity, 'username', None),
+                        export_type=ExportType.BOTH
+                    )
+                    new_channels.append(channel_info)
+            
+            if new_channels:
+                self.channels = new_channels
+                self.save_channels()
+                self.console.print(f"[green]✓ Выбрано {len(new_channels)} каналов[/green]")
+            else:
+                self.console.print("[yellow]⚠ Каналы не выбраны[/yellow]")
+                
         except Exception as e:
+            self.logger.error(f"Error selecting channels: {e}")
             self.console.print(f"[red]Ошибка выбора каналов: {e}[/red]")
-            self.logger.error(f"Channel selection error: {e}")
-    
+
+    def _start_key_listener(self):
+        """Запуск потока для прослушивания клавиш"""
+        if self.key_thread_running:
+            return
+            
+        self.key_thread_running = True
+        self.key_thread = threading.Thread(target=self._key_listener_thread, daemon=True)
+        self.key_thread.start()
+
+    def _key_listener_thread(self):
+        """Поток для прослушивания клавиш"""
+        import msvcrt
+        while self.key_thread_running:
+            if msvcrt.kbhit():
+                key = msvcrt.getch().decode('utf-8').lower()
+                self.key_queue.put(key)
+            time.sleep(0.1)
+
+    def _stop_key_listener(self):
+        """Остановка потока для прослушивания клавиш"""
+        self.key_thread_running = False
+        if self.key_thread:
+            self.key_thread.join()
+            self.key_thread = None
+
     def create_status_display(self) -> Layout:
-        """Создание информативного статусного экрана с двумя панелями"""
+        """Создание отображения статуса с двумя панелями"""
         layout = Layout()
-        
-        layout.split_column(
-            Layout(name="header", size=3),
-            Layout(name="main"),
-            Layout(name="footer", size=3)
+        layout.split_row(
+            Layout(name="left", ratio=2),   # Левая панель (список каналов) - 2/3 ширины
+            Layout(name="right", ratio=1)   # Правая панель (статистика) - 1/3 ширины
         )
         
-        # Заголовок
-        header_text = Text("Telegram Channel Exporter", style="bold magenta")
-        header_text.append(" | Статус: Работает", style="bold green")
-        if self.stats.current_export_info:
-            header_text.append(f" | {self.stats.current_export_info}", style="yellow")
-        layout["header"].update(Panel(header_text, box=box.DOUBLE))
-        
-        # Главная область - разделена на левую и правую панели (2:1)
-        layout["main"].split_row(
-            Layout(name="left", ratio=2),
-            Layout(name="right", ratio=1)
-        )
-        
-        # Левая панель - оптимизированная таблица каналов с полным растягиванием
+        # Создаем таблицу каналов для левой панели
         channels_table = self._create_detailed_channels_table()
-        layout["main"]["left"].update(Panel(channels_table, title="Мониторинг каналов", box=box.ROUNDED, expand=True))
+        layout["left"].update(Panel(channels_table, title="Каналы", border_style="blue"))
         
-        # Правая панель - детальная статистика
-        stats_content = self._create_detailed_statistics()
-        layout["main"]["right"].update(Panel(stats_content, title="Статистика", box=box.ROUNDED))
-        
-        # Добавляем информацию о подвале
-        footer_content = self._create_footer_info()
-        layout["footer"].update(Panel(footer_content, box=box.ROUNDED))
+        # Создаем статистику для правой панели
+        stats_text = self._create_detailed_statistics()
+        layout["right"].update(Panel(stats_text, title="Статистика", border_style="green"))
         
         return layout
 
@@ -1061,652 +1064,32 @@ class TelegramExporter:
                 if json_file.exists():
                     try:
                         with open(json_file, 'r', encoding='utf-8') as f:
-                            export_data = json.load(f)
-                        
-                        if isinstance(export_data, list):
-                            exported += len(export_data)
-                        elif isinstance(export_data, dict) and 'messages' in export_data:
-                            exported += len(export_data['messages'])
+                            data = json.load(f)
+                            exported += len(data)
                     except Exception as e:
-                        self.logger.debug(f"Error reading export file for {channel.title}: {e}")
+                        self.logger.warning(f"Error reading export file for {channel.title}: {e}")
+                else:
+                    # Если файл не существует, считаем что экспортировано 0 сообщений
+                    exported += 0
             
-            # Обновляем статистику
             self.stats.discovered_messages = discovered
             self.stats.exported_messages = exported
             
         except Exception as e:
             self.logger.error(f"Error updating discovered/exported stats: {e}")
-            # При ошибке сбрасываем статистику
-            self.stats.discovered_messages = 0
-            self.stats.exported_messages = 0
-    
-    def _verify_md_file_count(self, channel: ChannelInfo) -> tuple[bool, int]:
-        """Проверяет количество сообщений в MD файле канала
-        
-        Args:
-            channel: Информация о канале для проверки
-            
-        Returns:
-            tuple[bool, int]: (Совпадает ли количество, фактическое количество сообщений в MD файле)
-        """
-        try:
-            # Получаем путь к MD файлу
-            try:
-                storage_cfg = self.config_manager.config.storage
-                base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
-            except Exception:
-                base_dir = 'exports'
-            
-            base_path = Path(base_dir)
-            sanitized_title = self._sanitize_channel_filename(channel.title)
-            channel_dir = base_path / sanitized_title
-            md_file = channel_dir / f"{sanitized_title}.md"
-            
-            # Проверяем существование MD файла
-            if not md_file.exists():
-                self.logger.warning(f"MD файл не найден для канала {channel.title}")
-                return False, 0
-            
-            # Читаем MD файл и подсчитываем количество сообщений
-            try:
-                with open(md_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
-                # Используем регулярное выражение для поиска заголовков сообщений
-                # Паттерн для поиска строк вида "## Сообщение #123" или "## Message #123"
-                message_pattern = r'^## (?:Сообщение|Message) #\d+'
-                messages_found = re.findall(message_pattern, content, re.MULTILINE)
-                actual_count = len(messages_found)
-                
-                # Сравниваем с ожидаемым количеством
-                expected_count = channel.total_messages
-                matches = (actual_count >= expected_count)  # Используем >= чтобы учесть возможные обновления
-                
-                if matches:
-                    self.logger.info(f"MD файл для {channel.title}: найдено {actual_count} сообщений, ожидалось {expected_count} - ОК")
-                else:
-                    self.logger.warning(f"MD файл для {channel.title}: найдено {actual_count} сообщений, ожидалось {expected_count} - НЕСООТВЕТСТВИЕ")
-                
-                return matches, actual_count
-                
-            except Exception as e:
-                self.logger.error(f"Ошибка чтения MD файла для {channel.title}: {e}")
-                return False, 0
-                
-        except Exception as e:
-            self.logger.error(f"Ошибка проверки MD файла для {channel.title}: {e}")
-            return False, 0
 
-    async def _post_loading_menu(self):
-        """Меню дополнительных действий после загрузки каналов"""
-        self.console.print(Panel(
-            "Каналы загружены и готовы к работе. Доступны дополнительные действия:\n"
-            "- [i]config[/i] — настроить типы экспорта каналов\n"
-            "- [i]start[/i] — запустить мониторинг (по умолчанию)",
-            title="Дополнительные действия", box=box.ROUNDED
-        ))
-        
-        action = Prompt.ask("Выберите действие", choices=["config", "start"], default="start")
-        
-        if action == "config":
-            self.configure_export_types()
-        # Для "start" продолжаем выполнение
-    
     async def run_scheduler(self):
-        """Запуск планировщика задач"""
-        while self.running:
-            schedule.run_pending()
-            await asyncio.sleep(60)  # Проверка каждую минуту
-
-    def _create_footer_info(self) -> Text:
-        """Создает информацию для подвала с инструкциями"""
-        footer_text = Text()
-        
-        footer_text.append("🎮 Управление: ", style="bold white")
-        footer_text.append("Программа работает автоматически\n", style="dim")
-        footer_text.append("🔧 Настройки: ", style="bold white")
-        footer_text.append("Доступны при запуске программы\n", style="dim")
-        footer_text.append("🛑 Остановка: ", style="bold white")
-        footer_text.append("Ctrl+C для завершения работы", style="dim")
-        
-        return footer_text
-    
-    def scroll_channels_up(self):
-        """Прокрутка списка каналов вверх"""
-        if self.channels_scroll_offset > 0:
-            self.channels_scroll_offset = max(0, self.channels_scroll_offset - self.channels_display_limit)
-    
-    def scroll_channels_down(self):
-        """Прокрутка списка каналов вниз"""
-        max_offset = max(0, len(self.channels) - self.channels_display_limit)
-        if self.channels_scroll_offset < max_offset:
-            self.channels_scroll_offset = min(max_offset, self.channels_scroll_offset + self.channels_display_limit)
-    
-    def configure_export_types(self):
-        """Настройка типов экспорта для каналов с дополнительными возможностями"""
-        if not self.channels:
-            self.console.print("[bright_red]Нет выбранных каналов[/bright_red]")
-            input("Нажмите Enter для продолжения...")
-            return
-        
-        self.console.clear()
-        self.console.print(Panel(
-            "Настройка экспорта",
-            style="bold magenta"
-        ))
-        
-        # Отображаем список каналов с текущими настройками
-        table = Table(box=box.ROUNDED)
-        table.add_column("№", style="cyan", width=4)
-        table.add_column("Канал", style="green")
-        table.add_column("Тип экспорта", style="yellow")
-        
-        export_type_names = {
-            ExportType.BOTH: "Сообщения и файлы",
-            ExportType.MESSAGES_ONLY: "Только сообщения",
-            ExportType.FILES_ONLY: "Только файлы"
-        }
-        
-        for i, channel in enumerate(self.channels, 1):
-            table.add_row(
-                str(i),
-                channel.title[:40] + "..." if len(channel.title) > 40 else channel.title,
-                export_type_names[channel.export_type]
-            )
-        
-        self.console.print(table)
-        
-        self.console.print("\n[bright_blue]Команды:[/bright_blue]")
-        self.console.print("1 - Изменить тип экспорта конкретного канала")
-        self.console.print("2 - Установить одинаковый тип для всех каналов")
-        self.console.print("3 - [новое] Переэкспортировать все каналы в Markdown")
-        self.console.print("4 - [новое] Переэкспортировать конкретный канал в Markdown")
-        self.console.print("q - Вернуться к главному экрану")
-        
-        choice = Prompt.ask("Выберите действие").strip().lower()
-        
-        if choice == "1":
-            self._configure_single_channel_export_type()
-        elif choice == "2":
-            self._configure_all_channels_export_type()
-        elif choice == "3":
-            asyncio.create_task(self._reexport_all_channels_to_markdown())
-        elif choice == "4":
-            self._reexport_single_channel_to_markdown()
-        elif choice == "q":
-            return
-        else:
-            self.console.print("[bright_red]Неверная команда[/bright_red]")
-            input("Нажмите Enter для продолжения...")
-    
-    def _configure_single_channel_export_type(self):
-        """Настройка типа экспорта для одного канала"""
+        """Запуск планировщика"""
         try:
-            channel_num = int(Prompt.ask("Введите номер канала")) - 1
-            if 0 <= channel_num < len(self.channels):
-                new_type = self._choose_export_type()
-                if new_type:
-                    self.channels[channel_num].export_type = new_type
-                    self.save_channels()
-                    self.console.print(f"[bright_green]Тип экспорта для канала '{self.channels[channel_num].title}' обновлен[/bright_green]")
-            else:
-                self.console.print("[bright_red]Неверный номер канала[/bright_red]")
-        except ValueError:
-            self.console.print("[bright_red]Неверный формат номера[/bright_red]")
-        
-        input("Нажмите Enter для продолжения...")
-    
-    def _configure_all_channels_export_type(self):
-        """Настройка одинакового типа экспорта для всех каналов"""
-        new_type = self._choose_export_type()
-        if new_type:
-            for channel in self.channels:
-                channel.export_type = new_type
-            self.save_channels()
-            self.console.print("[bright_green]Тип экспорта обновлен для всех каналов[/bright_green]")
-        
-        input("Нажмите Enter для продолжения...")
-    
-    def _choose_export_type(self) -> Optional[ExportType]:
-        """Выбор типа экспорта"""
-        self.console.print("\nВыберите тип экспорта:")
-        self.console.print("1 - Сообщения и файлы (по умолчанию)")
-        self.console.print("2 - Только сообщения (без загрузки файлов)")
-        self.console.print("3 - Только файлы (без текста сообщений)")
-        
-        choice = Prompt.ask("Ваш выбор").strip()
-        
-        if choice == "1":
-            return ExportType.BOTH
-        elif choice == "2":
-            return ExportType.MESSAGES_ONLY
-        elif choice == "3":
-            return ExportType.FILES_ONLY
-        else:
-            self.console.print("[bright_red]Неверный выбор[/bright_red]")
-            return None
-    
-    async def _reexport_all_channels_to_markdown(self):
-        """Переэкспорт всех каналов в Markdown формат"""
-        if not Confirm.ask("Переэкспортировать все каналы в Markdown с перезаписью файлов?", default=False):
-            return
+            # Планируем экспорт всех каналов каждые 60 минут
+            schedule.every(60).minutes.do(lambda: asyncio.create_task(self.export_all_channels()))
             
-        self.console.print("[green]Запуск переэкспорта всех каналов...[/green]")
-        
-        success_count = 0
-        error_count = 0
-        
-        for i, channel in enumerate(self.channels, 1):
-            try:
-                self.console.print(f"[blue]Переэкспорт {i}/{len(self.channels)}: {channel.title}[/blue]")
-                await self._reexport_channel_to_markdown(channel)
-                success_count += 1
-                self.console.print(f"[green]✓ Завершен: {channel.title}[/green]")
-            except Exception as e:
-                error_count += 1
-                self.logger.error(f"Error reexporting {channel.title} to Markdown: {e}")
-                self.console.print(f"[red]✗ Ошибка: {channel.title} - {e}[/red]")
-        
-        self.console.print(f"\n[bold green]Переэкспорт завершен![/bold green]")
-        self.console.print(f"Успешно: {success_count}, Ошибок: {error_count}")
-        
-        # Отправляем уведомление
-        notification = f"📝 Переэкспорт в Markdown завершен\n✓ Успешно: {success_count}\n✗ Ошибок: {error_count}"
-        await self.send_notification(notification)
-        
-        input("Нажмите Enter для продолжения...")
-    
-    def _reexport_single_channel_to_markdown(self):
-        """Переэкспорт конкретного канала в Markdown формат"""
-        try:
-            channel_num = int(Prompt.ask("Введите номер канала")) - 1
-            if 0 <= channel_num < len(self.channels):
-                channel = self.channels[channel_num]
-                if Confirm.ask(f"Переэкспортировать '{channel.title}' в Markdown с перезаписью файла?", default=False):
-                    self.console.print(f"[green]Запуск переэкспорта: {channel.title}[/green]")
-                    asyncio.create_task(self._reexport_channel_to_markdown(channel))
-                    self.console.print(f"[green]✓ Переэкспорт запущен: {channel.title}[/green]")
-            else:
-                self.console.print("[bright_red]Неверный номер канала[/bright_red]")
-        except ValueError:
-            self.console.print("[bright_red]Неверный формат номера[/bright_red]")
-        
-        input("Нажмите Enter для продолжения...")
-    
-    async def _reexport_channel_to_markdown(self, channel: ChannelInfo):
-        """Переэкспорт конкретного канала в Markdown"""
-        try:
-            # Получаем путь к директории канала
-            try:
-                storage_cfg = self.config_manager.config.storage
-                base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
-            except Exception:
-                base_dir = 'exports'
-            
-            base_path = Path(base_dir)
-            sanitized_title = self._sanitize_channel_filename(channel.title)
-            channel_dir = base_path / sanitized_title
-            
-            # Получаем все сообщения из Telegram API заново
-            self.console.print(f"[blue]Получение сообщений из Telegram для {channel.title}...[/blue]")
-            
-            try:
-                # Получаем Telegram entity
-                entity = await self.client.get_entity(channel.id)
-                
-                # Получаем все сообщения канала
-                messages = []
-                message_count = 0
-                
-                async for message in self.client.iter_messages(entity, limit=None):
-                    # Фильтруем контент
-                    if self.content_filter.should_filter_message(message.text or ""):
-                        continue
-                        
-                    # Обрабатываем медиафайлы
-                    media_type = None
-                    media_path = None
-                    
-                    if message.media:
-                        if isinstance(message.media, MessageMediaPhoto):
-                            media_type = "photo"
-                        elif isinstance(message.media, MessageMediaDocument):
-                            if message.document:
-                                if message.document.mime_type and message.document.mime_type.startswith('image/'):
-                                    media_type = "photo"
-                                elif message.document.mime_type and message.document.mime_type.startswith('video/'):
-                                    media_type = "video"
-                                else:
-                                    media_type = "document"
-                    
-                    # Создаем MessageData
-                    msg_data = MessageData(
-                        id=message.id,
-                        date=message.date,
-                        text=message.text or "",
-                        author=getattr(message.sender, 'username', None) if message.sender else None,
-                        media_type=media_type,
-                        media_path=media_path,
-                        views=getattr(message, 'views', 0) or 0,
-                        forwards=getattr(message, 'forwards', 0) or 0,
-                        replies=getattr(message, 'replies', {}).get('replies', 0) if hasattr(message, 'replies') and message.replies else 0,
-                        edited=message.edit_date
-                    )
-                    messages.append(msg_data)
-                    message_count += 1
-                    
-                    # Показываем прогресс каждые 100 сообщений
-                    if message_count % 100 == 0:
-                        self.console.print(f"[green]Обработано {message_count} сообщений...[/green]")
-                
-                self.console.print(f"[green]Получено {len(messages)} сообщений для реэкспорта[/green]")
-                
-                if not messages:
-                    raise ValueError(f"Не найдено сообщений для реэкспорта канала {channel.title}")
-                
-                # Сортируем сообщения по ID (старые сначала)
-                messages.sort(key=lambda x: x.id)
-                
-                # Создаем Markdown экспортер и перезаписываем файл
-                md_exporter = MarkdownExporter(channel.title, channel_dir)
-                md_file = md_exporter.export_messages(messages, append_mode=False)  # append_mode=False для перезаписи
-                
-                if md_file and Path(md_file).exists():
-                    self.logger.info(f"Successfully reexported {channel.title} to Markdown: {md_file}")
-                    self.console.print(f"[green]✓ Переэкспорт в Markdown завершен: {md_file}[/green]")
-                else:
-                    raise RuntimeError(f"Не удалось создать Markdown файл для {channel.title}")
-                    
-            except Exception as e:
-                self.logger.error(f"Error getting messages from Telegram for {channel.title}: {e}")
-                raise
-            
+            while self.running:
+                schedule.run_pending()
+                await asyncio.sleep(1)
         except Exception as e:
-            self.logger.error(f"Error reexporting {channel.title} to Markdown: {e}")
-            raise
-    
-    async def _handle_reexport_channels(self):
-        """Обработка переэкспорта сообщений каналов с перезаписью"""
-        if not self.channels:
-            self.console.print("[yellow]Каналы не выбраны. Необходимо сначала выбрать каналы для экспорта.[/yellow]")
-            return
-        
-        self.console.clear()
-        self.console.print(Panel(
-            "Переэкспорт сообщений каналов",
-            style="bold magenta"
-        ))
-        
-        # Отображаем список каналов
-        table = Table(box=box.ROUNDED)
-        table.add_column("№", style="cyan", width=4)
-        table.add_column("Канал", style="green")
-        table.add_column("Сообщений", style="yellow", justify="right")
-        
-        for i, channel in enumerate(self.channels, 1):
-            table.add_row(
-                str(i),
-                channel.title[:50] + "..." if len(channel.title) > 50 else channel.title,
-                str(channel.total_messages)
-            )
-        
-        self.console.print(table)
-        
-        self.console.print("\n[bright_blue]Варианты переэкспорта:[/bright_blue]")
-        self.console.print("1 - Переэкспортировать все каналы в все форматы")
-        self.console.print("2 - Переэкспортировать конкретный канал в все форматы")
-        self.console.print("3 - Переэкспортировать все каналы только в Markdown")
-        self.console.print("4 - Переэкспортировать конкретный канал только в Markdown")
-        self.console.print("q - Вернуться к главному меню")
-        
-        choice = Prompt.ask("Выберите действие").strip().lower()
-        
-        if choice == "1":
-            await self._reexport_all_channels_all_formats()
-        elif choice == "2":
-            await self._reexport_single_channel_all_formats()
-        elif choice == "3":
-            await self._reexport_all_channels_to_markdown()
-        elif choice == "4":
-            await self._reexport_single_channel_to_markdown_from_menu()
-        elif choice == "q":
-            return
-        else:
-            self.console.print("[bright_red]Неверная команда[/bright_red]")
-            input("Нажмите Enter для продолжения...")
-    
-    async def _reexport_all_channels_all_formats(self):
-        """Переэкспорт всех каналов во все форматы"""
-        if not Confirm.ask("Переэкспортировать все каналы в JSON, HTML и Markdown с перезаписью файлов?", default=False):
-            return
-            
-        self.console.print("[green]Запуск полного переэкспорта всех каналов...[/green]")
-        
-        success_count = 0
-        error_count = 0
-        
-        for i, channel in enumerate(self.channels, 1):
-            try:
-                self.console.print(f"[blue]Переэкспорт {i}/{len(self.channels)}: {channel.title}[/blue]")
-                await self._reexport_channel_to_all_formats(channel)
-                success_count += 1
-                self.console.print(f"[green]✓ Завершен: {channel.title}[/green]")
-            except Exception as e:
-                error_count += 1
-                self.logger.error(f"Error reexporting {channel.title} to all formats: {e}")
-                self.console.print(f"[red]✗ Ошибка: {channel.title} - {e}[/red]")
-        
-        self.console.print(f"\n[bold green]Полный переэкспорт завершен![/bold green]")
-        self.console.print(f"Успешно: {success_count}, Ошибок: {error_count}")
-        
-        # Отправляем уведомление
-        notification = f"📋 Полный переэкспорт в все форматы завершен\n✓ Успешно: {success_count}\n✗ Ошибок: {error_count}"
-        await self.send_notification(notification)
-        
-        input("Нажмите Enter для продолжения...")
-    
-    async def _reexport_single_channel_all_formats(self):
-        """Переэкспорт конкретного канала во все форматы"""
-        try:
-            channel_num = int(Prompt.ask("Введите номер канала")) - 1
-            if 0 <= channel_num < len(self.channels):
-                channel = self.channels[channel_num]
-                if Confirm.ask(f"Переэкспортировать '{channel.title}' в JSON, HTML и Markdown с перезаписью файлов?", default=False):
-                    self.console.print(f"[green]Запуск полного переэкспорта: {channel.title}[/green]")
-                    await self._reexport_channel_to_all_formats(channel)
-                    self.console.print(f"[green]✓ Полный переэкспорт завершен: {channel.title}[/green]")
-            else:
-                self.console.print("[bright_red]Неверный номер канала[/bright_red]")
-        except ValueError:
-            self.console.print("[bright_red]Неверный формат номера[/bright_red]")
-        
-        input("Нажмите Enter для продолжения...")
-    
-    async def _reexport_single_channel_to_markdown_from_menu(self):
-        """Переэкспорт конкретного канала в Markdown формат из меню"""
-        try:
-            channel_num = int(Prompt.ask("Введите номер канала")) - 1
-            if 0 <= channel_num < len(self.channels):
-                channel = self.channels[channel_num]
-                if Confirm.ask(f"Переэкспортировать '{channel.title}' в Markdown с перезаписью файла?", default=False):
-                    self.console.print(f"[green]Запуск переэкспорта: {channel.title}[/green]")
-                    await self._reexport_channel_to_markdown(channel)
-                    self.console.print(f"[green]✓ Переэкспорт завершен: {channel.title}[/green]")
-            else:
-                self.console.print("[bright_red]Неверный номер канала[/bright_red]")
-        except ValueError:
-            self.console.print("[bright_red]Неверный формат номера[/bright_red]")
-        
-        input("Нажмите Enter для продолжения...")
-    
-    async def _reexport_channel_to_all_formats(self, channel: ChannelInfo):
-        """Переэкспорт конкретного канала во все форматы"""
-        try:
-            # Получаем путь к директории канала
-            try:
-                storage_cfg = self.config_manager.config.storage
-                base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
-            except Exception:
-                base_dir = 'exports'
-            
-            base_path = Path(base_dir)
-            sanitized_title = self._sanitize_channel_filename(channel.title)
-            channel_dir = base_path / sanitized_title
-            
-            # Получаем все сообщения из Telegram API заново
-            self.console.print(f"[blue]Получение сообщений из Telegram для {channel.title}...[/blue]")
-            
-            try:
-                # Получаем Telegram entity
-                entity = await self.client.get_entity(channel.id)
-                
-                # Получаем все сообщения канала
-                messages = []
-                message_count = 0
-                
-                async for message in self.client.iter_messages(entity, limit=None):
-                    # Фильтруем контент
-                    if self.content_filter.should_filter_message(message.text or ""):
-                        continue
-                        
-                    # Обрабатываем медиафайлы
-                    media_type = None
-                    media_path = None
-                    
-                    if message.media:
-                        if isinstance(message.media, MessageMediaPhoto):
-                            media_type = "photo"
-                        elif isinstance(message.media, MessageMediaDocument):
-                            if message.document:
-                                if message.document.mime_type and message.document.mime_type.startswith('image/'):
-                                    media_type = "photo"
-                                elif message.document.mime_type and message.document.mime_type.startswith('video/'):
-                                    media_type = "video"
-                                else:
-                                    media_type = "document"
-                    
-                    # Создаем MessageData
-                    msg_data = MessageData(
-                        id=message.id,
-                        date=message.date,
-                        text=message.text or "",
-                        author=getattr(message.sender, 'username', None) if message.sender else None,
-                        media_type=media_type,
-                        media_path=media_path,
-                        views=getattr(message, 'views', 0) or 0,
-                        forwards=getattr(message, 'forwards', 0) or 0,
-                        replies=getattr(message, 'replies', {}).get('replies', 0) if hasattr(message, 'replies') and message.replies else 0,
-                        edited=message.edit_date
-                    )
-                    messages.append(msg_data)
-                    message_count += 1
-                    
-                    # Показываем прогресс каждые 100 сообщений
-                    if message_count % 100 == 0:
-                        self.console.print(f"[green]Обработано {message_count} сообщений...[/green]")
-                
-                self.console.print(f"[green]Получено {len(messages)} сообщений для реэкспорта[/green]")
-                
-                if not messages:
-                    raise ValueError(f"Не найдено сообщений для реэкспорта канала {channel.title}")
-                
-                # Сортируем сообщения по ID (старые сначала)
-                messages.sort(key=lambda x: x.id)
-                
-                # Экспортируем в JSON (перезаписываем)
-                json_exporter = JSONExporter(channel.title, channel_dir)
-                json_file = json_exporter.export_messages(messages, append_mode=False)
-                
-                # Экспортируем в HTML (перезаписываем)
-                html_exporter = HTMLExporter(channel.title, channel_dir)
-                html_file = html_exporter.export_messages(messages, append_mode=False)
-                
-                # Экспортируем в Markdown (перезаписываем)
-                md_exporter = MarkdownExporter(channel.title, channel_dir)
-                md_file = md_exporter.export_messages(messages, append_mode=False)
-                
-                # Проверяем успешность экспорта
-                files_created = []
-                if json_file and Path(json_file).exists():
-                    files_created.append("JSON")
-                if html_file and Path(html_file).exists():
-                    files_created.append("HTML")
-                if md_file and Path(md_file).exists():
-                    files_created.append("Markdown")
-                
-                if files_created:
-                    self.logger.info(f"Successfully reexported {channel.title} to formats: {', '.join(files_created)}")
-                    self.console.print(f"[green]✓ Переэкспорт завершен: {', '.join(files_created)}[/green]")
-                else:
-                    raise RuntimeError(f"Не удалось создать файлы экспорта для {channel.title}")
-                    
-            except Exception as e:
-                self.logger.error(f"Error getting messages from Telegram for {channel.title}: {e}")
-                raise
-            
-        except Exception as e:
-            self.logger.error(f"Error reexporting {channel.title} to all formats: {e}")
-            raise
+            self.logger.error(f"Scheduler error: {e}")
 
-    def _start_key_listener(self):
-        """Запуск потока для отслеживания клавиш"""
-        if self.key_thread and self.key_thread.is_alive():
-            return
-        
-        self.key_thread_running = True
-        self.key_thread = threading.Thread(target=self._key_listener, daemon=True)
-        self.key_thread.start()
-    
-    def _stop_key_listener(self):
-        """Остановка потока отслеживания клавиш"""
-        self.key_thread_running = False
-    
-    def _key_listener(self):
-        """Поток для отслеживания клавиш в Windows"""
-        try:
-            import msvcrt
-            while self.key_thread_running and self.running:
-                if msvcrt.kbhit():
-                    key = msvcrt.getch()
-                    if key == b'\xe0':  # Специальные клавиши
-                        key = msvcrt.getch()
-                        if key == b'H':  # Стрелка вверх
-                            self.key_queue.put('up')
-                        elif key == b'P':  # Стрелка вниз
-                            self.key_queue.put('down')
-                    elif key.lower() == b'e':
-                        self.key_queue.put('export')
-                    elif key == b'\x03':  # Ctrl+C
-                        self.key_queue.put('quit')
-                time.sleep(0.1)
-        except ImportError:
-            # Не Windows, отключаем обработку клавиш
-            pass
-        except Exception:
-            pass
-    
-    def _process_key_input(self):
-        """Обработка нажатий клавиш"""
-        try:
-            while not self.key_queue.empty():
-                key = self.key_queue.get_nowait()
-                if key == 'up':
-                    self.scroll_channels_up()
-                elif key == 'down':
-                    self.scroll_channels_down()
-                elif key == 'export':
-                    self._stop_key_listener()
-                    try:
-                        self.configure_export_types()
-                    finally:
-                        self._start_key_listener()
-                elif key == 'quit':
-                    self.running = False
-                    return True
-        except queue.Empty:
-            pass
-        return False
-    
     async def _process_single_message(self, message: Message, channel: ChannelInfo, media_downloader) -> Optional[MessageData]:
         """Обработка одного сообщения с учетом типа экспорта"""
         try:
@@ -1972,7 +1355,7 @@ class TelegramExporter:
             
             self.stats.total_messages_in_channel = total_messages_in_channel
             
-            # Инициализация экспортеров
+            # Инициализируем экспортеров
             json_exporter = JSONExporter(channel.title, channel_dir)
             html_exporter = HTMLExporter(channel.title, channel_dir)
             md_exporter = MarkdownExporter(channel.title, channel_dir)
@@ -2295,7 +1678,6 @@ class TelegramExporter:
                 channel.last_check = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
                 # Обновление общей статистики
-                # Обновление общей статистики
                 self.stats.total_messages += len(messages_data)
                 self.stats.total_size_mb += total_size
                 # Добавляем отфильтрованные сообщения из текущей сессии к общей статистике
@@ -2404,90 +1786,40 @@ class TelegramExporter:
                     
                     for exporter, format_name in missing_files:
                         try:
-                            # Создаем файл с пустым списком сообщений
-                            empty_file = exporter.export_messages([], append_mode=False)
-                            if empty_file and Path(empty_file).exists():
-                                self.logger.info(f"Created empty {format_name} file: {empty_file}")
-                            else:
-                                self.logger.error(f"Failed to create empty {format_name} file")
+                            if format_name == "JSON":
+                                with open(exporter.output_dir / f"{exporter.sanitize_filename(exporter.channel_name)}.json", 'w', encoding='utf-8') as f:
+                                    json.dump([], f, ensure_ascii=False, indent=2)
+                            elif format_name == "HTML":
+                                exporter.export_messages([], append_mode=False)
+                            elif format_name == "Markdown":
+                                exporter.export_messages([], append_mode=False)
+                            self.logger.info(f"Created empty {format_name} file for {channel.title}")
                         except Exception as e:
-                            self.logger.error(f"Error creating empty {format_name} file: {e}")
-                
-                # Если экспорт прошел без сообщений, но в канале есть сообщения - повторная проверка
-                if total_messages_in_channel > 0:
-                    self.logger.info(f"Re-checking channel {channel.title} - found {total_messages_in_channel} total messages")
-                    self.stats.current_export_info = f"Повторная проверка: {channel.title} | Всего сообщений: {total_messages_in_channel}"
+                            self.logger.error(f"Error creating empty {format_name} file for {channel.title}: {e}")
+                            self.stats.export_errors += 1
+                else:
+                    self.logger.info(f"All export files already exist for {channel.title}")
                     
-                    # Если это первая проверка и сообщений нет, но в канале они есть - принудительно экспортируем все
-                    if channel.last_message_id == 0 and total_messages_in_channel > 0:
-                        self.logger.warning(f"Channel {channel.title} has {total_messages_in_channel} messages but export returned 0. This might indicate an access issue.")
-                        # Можно добавить дополнительную диагностику здесь
-            
-            # Сбрасываем счетчик FloodWait попыток после успешного завершения
-            self._floodwait_retry_count = 0
-            
-            # Обновляем статистику обнаруженных/экспортированных сообщений
-            self._update_discovered_exported_stats()
-            
-            # Очищаем статус проверки MD файлов после успешного экспорта
-            if md_file_missing or self.stats.md_verification_status:
-                self.stats.md_verification_status = None
-                self.stats.md_verification_channel = None
-                self.stats.md_verification_progress = None
-                # Сбрасываем счетчик повторных экспортов после успешного завершения
-                self.stats.md_reexport_count = 0
-                self.logger.info(f"Экспорт для {channel.title} успешно завершен, MD проверка очищена")
-            
-            # Убираем флаг принудительного ре-экспорта
-            if hasattr(channel, '_force_full_reexport'):
-                delattr(channel, '_force_full_reexport')
-            
-            # Сохранение обновленной информации о каналах (включая last_message_id и total_messages)
-            self.save_channels()
-            
+                # Обновляем статистику канала даже если новых сообщений нет
+                channel.last_check = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Отправляем уведомление о проверке без новых сообщений
+                notification = self._create_notification(channel, 0, True)
+                await self.send_notification(notification)
+                
         except Exception as e:
-            self.logger.error(f"Export error for channel {channel.title}: {e}")
+            self.logger.error(f"Critical error in export_channel for {channel.title}: {e}")
             self.stats.export_errors += 1
-            
-            # Отправка уведомления об ошибке
+            # Отправляем уведомление об ошибке
             notification = self._create_notification(channel, 0, False, str(e))
             await self.send_notification(notification)
-        finally:
-            # Очищаем информацию о текущем экспорте
-            self.stats.current_export_info = None
-            self.stats.total_messages_in_channel = 0
-    
-    def reset_channel_export_state(self, channel_title: str) -> bool:
-        """Сброс состояния экспорта канала для принудительного переэкспорта всех сообщений"""
-        for channel in self.channels:
-            if channel.title == channel_title:
-                old_id = channel.last_message_id
-                channel.last_message_id = 0
-                channel.total_messages = 0
-                channel.last_check = None
-                # Отмечаем, что при следующем экспорте нужно полностью переэкспортировать
-                channel._force_full_reexport = True
-                self.logger.info(f"Reset export state for channel {channel_title}: last_message_id {old_id} -> 0")
-                self.save_channels()
-                return True
-        return False
-    
-    def list_channels_with_issues(self) -> List[str]:
-        """Возвращает список каналов, которые могут иметь проблемы с экспортом"""
-        problematic_channels = []
-        for channel in self.channels:
-            if channel.total_messages == 0 and channel.last_check:
-                problematic_channels.append(channel.title)
-        return problematic_channels
-    
-    async def verify_and_complete_export(self, channel: ChannelInfo) -> bool:
-        """Проверяет целостность экспорта канала и докачивает недостающие сообщения"""
+
+    def _verify_md_file_count(self, channel: ChannelInfo) -> tuple[bool, int]:
+        """Проверяет количество сообщений в MD файле"""
         try:
-            self.logger.info(f"Проверка целостности экспорта для канала: {channel.title}")
-            
-            # Получаем путь к директории канала
+            # Получаем путь к MD файлу
             try:
-                storage_cfg = self.config_manager.config.storage
+                storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
                 base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
             except Exception:
                 base_dir = 'exports'
@@ -2495,225 +1827,35 @@ class TelegramExporter:
             base_path = Path(base_dir)
             sanitized_title = self._sanitize_channel_filename(channel.title)
             channel_dir = base_path / sanitized_title
+            md_file = channel_dir / f"{sanitized_title}.md"
             
-            # Проверяем существование JSON файла экспорта
-            json_file = channel_dir / f"{sanitized_title}.json"
-            if not json_file.exists():
-                self.logger.info(f"JSON файл не найден для {channel.title}, требуется полный экспорт")
-                return False
+            if not md_file.exists():
+                self.logger.warning(f"MD file not found for channel {channel.title}")
+                return False, 0
             
-            # Читаем существующий экспорт
-            try:
-                with open(json_file, 'r', encoding='utf-8') as f:
-                    export_data = json.load(f)
-                
-                if not isinstance(export_data, list):
-                    self.logger.warning(f"Неверный формат JSON файла для {channel.title}")
-                    return False
-                
-                # Извлекаем ID сообщений из экспорта
-                exported_ids = set()
-                for msg in export_data:
-                    if isinstance(msg, dict) and 'id' in msg:
-                        exported_ids.add(msg['id'])
-                
-                self.logger.info(f"Найдено {len(exported_ids)} сообщений в существующем экспорте")
-                
-            except Exception as e:
-                self.logger.error(f"Ошибка чтения JSON файла для {channel.title}: {e}")
-                return False
+            # Подсчитываем количество сообщений в MD файле
+            message_count = 0
+            with open(md_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    # Ищем строки, которые начинаются с заголовка сообщения (обычно ## или ###)
+                    if line.strip().startswith('## ') or line.strip().startswith('### '):
+                        # Проверяем, что это действительно заголовок сообщения, а не другой заголовок
+                        # Обычно заголовки сообщений содержат дату в формате DD.MM.YYYY HH:MM
+                        import re
+                        # Паттерн для даты в заголовке сообщения
+                        date_pattern = r'\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}'
+                        if re.search(date_pattern, line):
+                            message_count += 1
             
-            # Получаем актуальный диапазон сообщений в канале
-            try:
-                entity = await self.client.get_entity(channel.id)
-                
-                # Получаем первое и последнее сообщения для определения диапазона
-                first_msg = await self.client.get_messages(entity, limit=1, reverse=True)
-                last_msg = await self.client.get_messages(entity, limit=1)
-                
-                if not first_msg or not last_msg:
-                    self.logger.warning(f"Не удалось получить сообщения из канала {channel.title}")
-                    return True  # Считаем что все в порядке если канал пустой
-                
-                first_id = first_msg[0].id
-                last_id = last_msg[0].id
-                
-                self.logger.info(f"Диапазон сообщений в канале {channel.title}: {first_id}-{last_id}")
-                
-                # Определяем недостающие сообщения
-                missing_ids = []
-                
-                # 1. Новые сообщения после последнего экспортированного
-                max_exported_id = max(exported_ids) if exported_ids else 0
-                if last_id > max_exported_id:
-                    # Получаем новые сообщения
-                    async for message in self.client.iter_messages(entity, min_id=max_exported_id, limit=None):
-                        if message.id not in exported_ids:
-                            missing_ids.append(message.id)
-                
-                # 2. Пропуски в середине диапазона
-                # Проверяем наличие значительных пропусков (более 10 подряд отсутствующих ID)
-                if exported_ids:
-                    min_exported_id = min(exported_ids)
-                    
-                    # Создаем список всех ID в диапазоне от min до max экспортированных
-                    expected_range = set(range(min_exported_id, max_exported_id + 1))
-                    gaps_in_range = expected_range - exported_ids
-                    
-                    # Фильтруем значительные пропуски (где отсутствует более 5 сообщений подряд)
-                    significant_gaps = []
-                    if gaps_in_range:
-                        sorted_gaps = sorted(gaps_in_range)
-                        current_gap = [sorted_gaps[0]]
-                        
-                        for i in range(1, len(sorted_gaps)):
-                            if sorted_gaps[i] == sorted_gaps[i-1] + 1:
-                                current_gap.append(sorted_gaps[i])
-                            else:
-                                if len(current_gap) >= 5:  # Значительный пропуск
-                                    significant_gaps.extend(current_gap)
-                                current_gap = [sorted_gaps[i]]
-                        
-                        # Не забываем последний пропуск
-                        if len(current_gap) >= 5:
-                            significant_gaps.extend(current_gap)
-                    
-                    # Проверяем, существуют ли эти сообщения в канале
-                    for gap_id in significant_gaps:
-                        try:
-                            msg = await self.client.get_messages(entity, ids=gap_id)
-                            if msg and msg[0] and gap_id not in exported_ids:
-                                missing_ids.append(gap_id)
-                        except Exception:
-                            # Сообщение не существует, игнорируем
-                            pass
-                
-                missing_ids = sorted(set(missing_ids))
-                
-                if not missing_ids:
-                    self.logger.info(f"Экспорт канала {channel.title} полный, недостающих сообщений не найдено")
-                    return True
-                
-                self.logger.info(f"Найдено {len(missing_ids)} недостающих сообщений в канале {channel.title}")
-                
-                # Получаем недостающие сообщения
-                missing_messages = []
-                
-                # Используем батчевое получение для эффективности
-                batch_size = 100
-                for i in range(0, len(missing_ids), batch_size):
-                    batch_ids = missing_ids[i:i + batch_size]
-                    try:
-                        messages = await self.client.get_messages(entity, ids=batch_ids)
-                        for message in messages:
-                            if message and message.id:
-                                # Обрабатываем сообщение также как в основном экспорте
-                                msg_data = await self._process_single_message(message, channel, None)
-                                if msg_data:
-                                    missing_messages.append(msg_data)
-                    
-                    except Exception as e:
-                        self.logger.error(f"Ошибка получения батча сообщений {batch_ids}: {e}")
-                        # Пробуем получить по одному
-                        for msg_id in batch_ids:
-                            try:
-                                msg = await self.client.get_messages(entity, ids=msg_id)
-                                if msg and msg[0] and msg[0].id:
-                                    msg_data = await self._process_single_message(msg[0], channel, None)
-                                    if msg_data:
-                                        missing_messages.append(msg_data)
-                            except Exception:
-                                continue
-                
-                if not missing_messages:
-                    self.logger.info(f"Недостающие сообщения не удалось получить для {channel.title}")
-                    return True
-                
-                self.logger.info(f"Получено {len(missing_messages)} недостающих сообщений для {channel.title}")
-                
-                # Добавляем недостающие сообщения к существующему экспорту
-                # Объединяем с существующими данными
-                combined_messages = list(export_data)
-                
-                for msg_data in missing_messages:
-                    # Преобразуем MessageData в словарь для добавления в JSON
-                    msg_dict = {
-                        'id': msg_data.id,
-                        'date': msg_data.date.isoformat() if msg_data.date else None,
-                        'text': msg_data.text,
-                        'author': msg_data.author,
-                        'media_type': msg_data.media_type,
-                        'media_path': msg_data.media_path,
-                        'views': msg_data.views,
-                        'forwards': msg_data.forwards,
-                        'replies': msg_data.replies,
-                        'edited': msg_data.edited.isoformat() if msg_data.edited else None
-                    }
-                    combined_messages.append(msg_dict)
-                
-                # Сортируем все сообщения по ID
-                combined_messages.sort(key=lambda x: x.get('id', 0))
-                
-                # Убираем дубликаты по ID
-                seen_ids = set()
-                unique_messages = []
-                for msg in combined_messages:
-                    msg_id = msg.get('id')
-                    if msg_id and msg_id not in seen_ids:
-                        seen_ids.add(msg_id)
-                        unique_messages.append(msg)
-                
-                # Сохраняем обновленный экспорт
-                with open(json_file, 'w', encoding='utf-8') as f:
-                    json.dump(unique_messages, f, ensure_ascii=False, indent=2)
-                
-                self.logger.info(f"Целостность экспорта восстановлена для {channel.title}: добавлено {len(missing_messages)} сообщений")
-                
-                # Обновляем также HTML и Markdown файлы
-                try:
-                    # Преобразуем обратно в MessageData для экспортеров
-                    updated_messages = []
-                    for msg_dict in unique_messages:
-                        msg_data = MessageData(
-                            id=msg_dict.get('id', 0),
-                            date=datetime.fromisoformat(msg_dict['date']) if msg_dict.get('date') else None,
-                            text=msg_dict.get('text', ''),
-                            author=msg_dict.get('author'),
-                            media_type=msg_dict.get('media_type'),
-                            media_path=msg_dict.get('media_path'),
-                            views=msg_dict.get('views', 0),
-                            forwards=msg_dict.get('forwards', 0),
-                            replies=msg_dict.get('replies', 0),
-                            edited=datetime.fromisoformat(msg_dict['edited']) if msg_dict.get('edited') else None
-                        )
-                        updated_messages.append(msg_data)
-                    
-                    # Обновляем HTML и Markdown файлы
-                    html_exporter = HTMLExporter(channel.title, channel_dir)
-                    md_exporter = MarkdownExporter(channel.title, channel_dir)
-                    
-                    html_exporter.export_messages(updated_messages, append_mode=False)  # Перезаписываем полностью
-                    md_exporter.export_messages(updated_messages, append_mode=False)  # Перезаписываем полностью
-                    
-                    self.logger.info(f"Обновлены HTML и Markdown файлы для {channel.title}")
-                    
-                except Exception as e:
-                    self.logger.error(f"Ошибка обновления HTML/Markdown файлов для {channel.title}: {e}")
-                
-                # Обновляем статистику канала
-                channel.last_message_id = max(last_id, channel.last_message_id)
-                channel.total_messages = len(unique_messages)
-                
-                return True
-                
-            except Exception as e:
-                self.logger.error(f"Ошибка проверки целостности для {channel.title}: {e}")
-                return False
-                
+            self.logger.info(f"MD file for {channel.title} contains {message_count} messages, expected {channel.total_messages}")
+            
+            # Сравниваем с ожидаемым количеством
+            return message_count == channel.total_messages, message_count
+            
         except Exception as e:
-            self.logger.error(f"Общая ошибка проверки целостности для {channel.title}: {e}")
-            return False
-    
+            self.logger.error(f"Error verifying MD file count for {channel.title}: {e}")
+            return False, 0
+
     def _create_notification(self, channel: ChannelInfo, messages_count: int, success: bool, error: str = None) -> str:
         """Создание текста уведомления"""
         if success and messages_count > 0:
@@ -2817,201 +1959,62 @@ class TelegramExporter:
                 
                 # Запускаем экспорт для каналов без MD файлов синхронно
                 # Чтобы обеспечить обработку всех каналов
-                try:
-                    loop = asyncio.get_running_loop()
-                    # Запускаем в фоновом режиме, но логируем начало
-                    task = loop.create_task(self._export_missing_md_channels(channels_needing_export))
-                    self.logger.info("Задача экспорта каналов без MD файлов запущена")
-                except RuntimeError:
-                    # Если нет текущего event loop, создаем новый
-                    self.logger.warning("Нет активного event loop, экспорт MD файлов будет отложен")
+                async def export_missing_channels():
+                    for channel in channels_needing_export:
+                        try:
+                            await self.export_channel(channel)
+                        except Exception as e:
+                            self.logger.error(f"Error exporting channel {channel.title} for missing MD file: {e}")
+                
+                # Создаем задачу для асинхронного выполнения
+                asyncio.create_task(export_missing_channels())
                 
         except Exception as e:
-            self.logger.error(f"Ошибка проверки MD файлов: {e}")
-    
-    async def _export_missing_md_channels(self, channels: List[ChannelInfo]):
-        """Экспорт каналов без MD файлов"""
-        try:
-            self.logger.info(f"Начало экспорта {len(channels)} каналов без MD файлов")
-            
-            for i, channel in enumerate(channels):
-                self.logger.info(f"Запуск экспорта для канала без MD файла: {channel.title} ({i+1}/{len(channels)})")
-                
-                # Обновляем информацию о текущем экспорте для авто-прокрутки
-                self.stats.current_export_info = f"Полный ре-экспорт {i+1}/{len(channels)}: {channel.title}"
-                
-                # Сбрасываем last_message_id чтобы загрузить все сообщения
-                original_last_id = channel.last_message_id
-                channel.last_message_id = 0
-                
-                # Отмечаем, что это принудительный полный ре-экспорт
-                channel._force_full_reexport = True
-                
-                try:
-                    await self.export_channel(channel)
-                    self.logger.info(f"Успешно экспортирован канал: {channel.title}")
-                except Exception as e:
-                    self.logger.error(f"Ошибка экспорта канала {channel.title}: {e}")
-                    # Восстанавливаем оригинальное значение при ошибке
-                    channel.last_message_id = original_last_id
-                finally:
-                    # Убираем флаг принудительного ре-экспорта
-                    if hasattr(channel, '_force_full_reexport'):
-                        delattr(channel, '_force_full_reexport')
-                    # Очищаем информацию о текущем экспорте между каналами
-                    self.stats.current_export_info = None
-                    # Небольшая пауза для обновления UI
-                    await asyncio.sleep(0.5)
-            
-            self.logger.info(f"Завершен экспорт {len(channels)} каналов без MD файлов")
-            # Обновляем статистику обнаруженных/экспортированных сообщений
-            self._update_discovered_exported_stats()
-            # Окончательно очищаем информацию о экспорте
-            self.stats.current_export_info = None
-        except Exception as e:
-            self.logger.error(f"Ошибка экспорта каналов без MD файлов: {e}")
-        finally:
-            # Гарантируем очистку состояния
-            self.stats.current_export_info = None
-    
-    async def run(self):
-        """Главный метод запуска программы"""
-        self.console.print(Panel.fit(
-            "[bold blue]Telegram Channel Exporter[/bold blue]\n"
-            "Программа для мониторинга и экспорта каналов Telegram",
-            box=box.DOUBLE
-        ))
-        
-        # Проверка и настройка конфигурации
-        if not self.config_manager.ensure_configured():
-            return
-        
-        # Возможность изменения конфигурации
-        if Confirm.ask("Изменить настройки конфигурации?", default=False):
-            if not self.config_manager.interactive_setup():
-                return
-        
-        # Предложить импорт/экспорт списка каналов в произвольный JSON
-        try:
-            self.console.print(Panel(
-                "Вы можете импортировать/экспортировать список каналов для ручного редактирования в JSON.\n"
-                "Доступные действия:\n"
-                "- [i]import[/i] — загрузить из JSON-файла\n"
-                "- [i]export[/i] — сохранить текущий список в JSON\n"
-                "- [i]reset[/i] — сбросить состояние экспорта для проблемных каналов\n"
-                "- [i]skip[/i] — пропустить",
-                title="Импорт/Экспорт каналов", box=box.ROUNDED
-            ))
-            io_action = Prompt.ask("Действие", choices=["import", "export", "reset", "skip"], default="skip")
-            if io_action == "import":
-                # Перед импортом попробуем подтянуть актуальный файл с WebDAV
-                if self._webdav_enabled():
-                    await self._webdav_download_and_notify()
-                path_str = Prompt.ask("Путь к JSON-файлу для импорта", default="channels.json")
-                file_path = Path(path_str)
-                if not file_path.exists():
-                    self.console.print(f"[red]Файл {file_path} не найден[/red]")
-                else:
-                    if self.load_channels_from_file(file_path):
-                        self.console.print(f"[green]✓ Импортировано каналов: {len(self.channels)}[/green]")
-            elif io_action == "export":
-                # Если каналов пока нет — дадим возможность выбрать, чтобы было что сохранять
-                if not self.channels and Confirm.ask("Список каналов пуст. Выбрать каналы перед экспортом?", default=True):
-                    # Инициализация клиента перед выбором
-                    if not await self.initialize_client():
-                        return
-                    await self.select_channels()
-                path_str = Prompt.ask("Путь для сохранения JSON", default="channels.json")
-                self.save_channels_to_file(Path(path_str))
-                # После сохранения — выгрузка на WebDAV, если включен и совпадает основной путь
-                if self._webdav_enabled():
-                    await self._webdav_upload_and_notify()
-            elif io_action == "reset":
-                # Показываем проблемные каналы и предлагаем сбросить их состояние
-                problematic_channels = self.list_channels_with_issues()
-                if problematic_channels:
-                    self.console.print(f"[yellow]Найдены каналы с возможными проблемами экспорта:[/yellow]")
-                    for i, title in enumerate(problematic_channels, 1):
-                        self.console.print(f"  {i}. {title}")
-                    
-                    if Confirm.ask("Сбросить состояние экспорта для этих каналов?", default=False):
-                        for title in problematic_channels:
-                            if self.reset_channel_export_state(title):
-                                self.console.print(f"[green]✓ Сброшено состояние для канала: {title}[/green]")
-                        self.console.print("[green]✓ Состояние экспорта сброшено. При следующем запуске каналы будут экспортированы заново.[/green]")
-                else:
-                    self.console.print("[green]Проблемных каналов не найдено[/green]")
-        except Exception as e:
-            self.logger.error(f"IO setup error: {e}")
+            self.logger.error(f"Error checking missing MD files: {e}")
 
-        # Инициализация клиента
-        if not await self.initialize_client():
-            return
-        
-        # Загрузка или выбор каналов
-        if not self.channels:
-            if self.channels_file.exists() and Confirm.ask("Использовать сохраненный список каналов?"):
-                self.load_channels()
-            else:
+    async def run(self):
+        """Запуск приложения"""
+        try:
+            self.console.print("[bold blue]🚀 Telegram Channel Exporter запускается...[/bold blue]")
+            
+            # Инициализация клиента
+            if not await self.initialize_client():
+                return
+            
+            # Загрузка каналов
+            self.load_channels()
+            
+            # Если каналы не загружены, предлагаем выбрать
+            if not self.channels:
+                self.console.print("[yellow]⚠ Каналы не найдены. Выберите каналы для мониторинга.[/yellow]")
                 await self.select_channels()
-        
-        if not self.channels:
-            self.console.print("[red]Каналы не выбраны. Завершение работы.[/red]")
-            return
-        
-        # Обновление статистики
-        self.stats.total_channels = len(self.channels)
-        
-        # Обновляем статистику обнаруженных и экспортированных сообщений
-        self._update_discovered_exported_stats()
-        
-        # Проверка целостности экспорта при запуске
-        self.console.print("[yellow]Проверка целостности экспортов...[/yellow]")
-        integrity_issues = 0
-        integrity_fixed = 0
-        
-        for channel in self.channels:
-            try:
-                self.console.print(f"Проверка канала: {channel.title}")
-                result = await self.verify_and_complete_export(channel)
-                if result:
-                    integrity_fixed += 1
-                else:
-                    integrity_issues += 1
-            except Exception as e:
-                self.logger.error(f"Ошибка проверки целостности для {channel.title}: {e}")
-                integrity_issues += 1
-        
-        # Сохраняем обновленную информацию о каналах после проверки целостности
-        self.save_channels()
-        
-        # Обновляем статистику обнаруженных/экспортированных сообщений
-        self._update_discovered_exported_stats()
-        
-        if integrity_fixed > 0:
-            self.console.print(f"[green]✓ Целостность восстановлена для {integrity_fixed} каналов[/green]")
-            # Отправляем уведомление о восстановлении
-            notification = f"📋 Проверка целостности завершена\n✅ Восстановлено: {integrity_fixed} каналов\n❌ Проблемы: {integrity_issues} каналов"
-            await self.send_notification(notification)
-        
-        if integrity_issues > 0:
-            self.console.print(f"[yellow]⚠ Проблемы с целостностью у {integrity_issues} каналов (см. лог)[/yellow]")
-        
-        if integrity_issues == 0 and integrity_fixed == 0:
-            self.console.print("[green]✓ Все экспорты актуальны[/green]")
-        
-        # Меню дополнительных действий после загрузки каналов
-        await self._post_loading_menu()
-        
-        # Запуск основного цикла
-        await self.main_loop()
+            
+            if not self.channels:
+                self.console.print("[red]❌ Каналы не выбраны. Завершение работы.[/red]")
+                return
+            
+            self.stats.total_channels = len(self.channels)
+            
+            # Запуск основного цикла
+            await self.main_loop()
+            
+        except Exception as e:
+            self.logger.error(f"Application error: {e}")
+            self.console.print(f"[red]❌ Критическая ошибка приложения: {e}[/red]")
+        finally:
+            self.console.print("[bold blue]👋 До свидания![/bold blue]")
 
 
 async def main():
-    """Точка входа в программу"""
+    """Точка входа в приложение"""
     exporter = TelegramExporter()
     await exporter.run()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nПолучен сигнал завершения (Ctrl+C)...")
+    except Exception as e:
+        print(f"Критическая ошибка: {e}")
