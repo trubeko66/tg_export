@@ -41,7 +41,7 @@ from rich import box
 import requests
 
 from exporters import (
-    MessageData, JSONExporter, HTMLExporter, MarkdownExporter, MediaDownloader
+    MessageData, JSONExporter, HTMLExporter, MarkdownExporter, MediaDownloader, BaseExporter
 )
 from config_manager import ConfigManager
 
@@ -120,6 +120,15 @@ class TelegramExporter:
         # Настройка логирования
         self.setup_logging()
         
+    def _sanitize_channel_filename(self, channel_title: str) -> str:
+        """Sanitize channel title for use as filename using the same logic as exporters"""
+        # Use the same sanitization logic as BaseExporter
+        sanitized = re.sub(r'[<>:"/\\|?*]', '_', channel_title)
+        # Ограничение длины
+        if len(sanitized) > 100:
+            sanitized = sanitized[:100] + "..."
+        return sanitized
+    
     # ===== Вспомогательные методы пути хранения =====
     def _get_channels_file_path(self) -> Path:
         try:
@@ -807,7 +816,8 @@ class TelegramExporter:
         try:
             storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
             export_base_dir = Path(self.config_manager.config.storage.export_base_dir or "exports")
-            channel_dir = export_base_dir / channel.title
+            sanitized_title = self._sanitize_channel_filename(channel.title)
+            channel_dir = export_base_dir / sanitized_title
             media_dir = channel_dir / "media"
             
             if not media_dir.exists():
@@ -1218,10 +1228,11 @@ class TelegramExporter:
                 base_dir = 'exports'
             
             base_path = Path(base_dir)
-            channel_dir = base_path / channel.title.replace('/', '_').replace('\\', '_')
+            sanitized_title = self._sanitize_channel_filename(channel.title)
+            channel_dir = base_path / sanitized_title
             
             # Проверяем наличие JSON файла с данными
-            json_file = channel_dir / f"{channel.title.replace('/', '_').replace('\\', '_')}.json"
+            json_file = channel_dir / f"{sanitized_title}.json"
             
             if not json_file.exists():
                 raise FileNotFoundError(f"Не найден JSON файл для канала {channel.title}")
@@ -1404,10 +1415,11 @@ class TelegramExporter:
                 base_dir = 'exports'
             
             base_path = Path(base_dir)
-            channel_dir = base_path / channel.title.replace('/', '_').replace('\\', '_')
+            sanitized_title = self._sanitize_channel_filename(channel.title)
+            channel_dir = base_path / sanitized_title
             
             # Проверяем наличие JSON файла с данными
-            json_file = channel_dir / f"{channel.title.replace('/', '_').replace('\\', '_')}.json"
+            json_file = channel_dir / f"{sanitized_title}.json"
             
             if not json_file.exists():
                 raise FileNotFoundError(f"Не найден JSON файл для канала {channel.title}")
@@ -1713,7 +1725,8 @@ class TelegramExporter:
                 base_dir = 'exports'
             base_path = Path(base_dir)
             base_path.mkdir(parents=True, exist_ok=True)
-            channel_dir = base_path / channel.title.replace('/', '_').replace('\\', '_')
+            sanitized_title = self._sanitize_channel_filename(channel.title)
+            channel_dir = base_path / sanitized_title
             channel_dir.mkdir(exist_ok=True)
             
             # Получение канала
@@ -2166,10 +2179,11 @@ class TelegramExporter:
                 base_dir = 'exports'
             
             base_path = Path(base_dir)
-            channel_dir = base_path / channel.title.replace('/', '_').replace('\\', '_')
+            sanitized_title = self._sanitize_channel_filename(channel.title)
+            channel_dir = base_path / sanitized_title
             
             # Проверяем существование JSON файла экспорта
-            json_file = channel_dir / f"{channel.title.replace('/', '_').replace('\\', '_')}.json"
+            json_file = channel_dir / f"{sanitized_title}.json"
             if not json_file.exists():
                 self.logger.info(f"JSON файл не найден для {channel.title}, требуется полный экспорт")
                 return False
