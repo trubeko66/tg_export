@@ -1815,14 +1815,23 @@ class TelegramExporter:
         """Экспорт всех каналов"""
         self.logger.info("Starting scheduled export of all channels")
         
-        for channel in self.channels:
+        for i, channel in enumerate(self.channels):
             try:
+                # Обновляем информацию о текущем экспорте для авто-прокрутки
+                self.stats.current_export_info = f"Экспорт {i+1}/{len(self.channels)}: {channel.title}"
                 await self.export_channel(channel)
             except Exception as e:
                 self.logger.error(f"Export error for channel {channel.title}: {e}")
                 self.stats.export_errors += 1
+            finally:
+                # Очищаем информацию о текущем экспорте между каналами
+                self.stats.current_export_info = None
+                # Небольшая пауза для обновления UI
+                await asyncio.sleep(0.5)
         
         self.stats.last_export_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Окончательно очищаем информацию о экспорте
+        self.stats.current_export_info = None
     
     async def export_channel(self, channel: ChannelInfo):
         """Экспорт конкретного канала"""
@@ -1850,16 +1859,37 @@ class TelegramExporter:
             # Получаем информацию о канале эффективно без полного подсчета сообщений
             total_messages_in_channel = 0
             try:
-                # Пытаемся получить примерную оценку количества сообщений
-                first_msg = await self.client.get_messages(entity, limit=1)
-                last_msg = await self.client.get_messages(entity, limit=1, reverse=True)
-                if first_msg and last_msg:
-                    # Оценка количества сообщений по диапазону ID (не идеально, но быстро)
-                    total_messages_in_channel = max(1, last_msg[0].id - first_msg[0].id + 1)
-                    self.logger.info(f"Channel {channel.title}: Estimated {total_messages_in_channel} messages (ID range: {first_msg[0].id}-{last_msg[0].id})")
-                    self.logger.info(f"Channel {channel.title}: Current last_message_id: {channel.last_message_id}")
+                # При принудительном полном ре-экспорте получаем реальное количество сообщений
+                if hasattr(channel, '_force_full_reexport') and channel._force_full_reexport:
+                    self.logger.info(f"Принудительный полный ре-экспорт: подсчитываем реальное количество сообщений в {channel.title}")
+                    # Получаем первое и последнее сообщения
+                    first_msg = await self.client.get_messages(entity, limit=1, reverse=True)
+                    last_msg = await self.client.get_messages(entity, limit=1)
+                    if first_msg and last_msg and len(first_msg) > 0 and len(last_msg) > 0:
+                        # Получаем точное количество сообщений через подсчет
+                        message_count = 0
+                        async for _ in self.client.iter_messages(entity):
+                            message_count += 1
+                            if message_count % 1000 == 0:
+                                self.logger.info(f"Подсчитано {message_count} сообщений в {channel.title}...")
+                        total_messages_in_channel = message_count
+                        self.logger.info(f"Реальное количество сообщений в {channel.title}: {total_messages_in_channel}")
+                        # Обновляем кэшированное значение
+                        channel.total_messages = total_messages_in_channel
+                    else:
+                        self.logger.warning(f"Channel {channel.title}: Не удалось получить сообщения для подсчета")
+                        total_messages_in_channel = 0
                 else:
-                    self.logger.warning(f"Channel {channel.title}: Could not get message range")
+                    # Обычный режим - пытаемся получить примерную оценку количества сообщений
+                    first_msg = await self.client.get_messages(entity, limit=1)
+                    last_msg = await self.client.get_messages(entity, limit=1, reverse=True)
+                    if first_msg and last_msg:
+                        # Оценка количества сообщений по диапазону ID (не идеально, но быстро)
+                        total_messages_in_channel = max(1, last_msg[0].id - first_msg[0].id + 1)
+                        self.logger.info(f"Channel {channel.title}: Estimated {total_messages_in_channel} messages (ID range: {first_msg[0].id}-{last_msg[0].id})")
+                        self.logger.info(f"Channel {channel.title}: Current last_message_id: {channel.last_message_id}")
+                    else:
+                        self.logger.warning(f"Channel {channel.title}: Could not get message range")
             except Exception as e:
                 self.logger.warning(f"Could not get channel info for {channel.title}: {e}")
                 total_messages_in_channel = 0
@@ -2621,8 +2651,16 @@ class TelegramExporter:
             if channels_needing_export:
                 self.logger.info(f"Найдено {len(channels_needing_export)} каналов без MD файлов, запуск экспорта")
                 
-                # Запускаем экспорт для каналов без MD файлов
-                asyncio.create_task(self._export_missing_md_channels(channels_needing_export))
+                # Запускаем экспорт для каналов без MD файлов синхронно
+                # Чтобы обеспечить обработку всех каналов
+                try:
+                    loop = asyncio.get_running_loop()
+                    # Запускаем в фоновом режиме, но логируем начало
+                    task = loop.create_task(self._export_missing_md_channels(channels_needing_export))
+                    self.logger.info("Задача экспорта каналов без MD файлов запущена")
+                except RuntimeError:
+                    # Если нет текущего event loop, создаем новый
+                    self.logger.warning("Нет активного event loop, экспорт MD файлов будет отложен")
                 
         except Exception as e:
             self.logger.error(f"Ошибка проверки MD файлов: {e}")
@@ -2630,8 +2668,13 @@ class TelegramExporter:
     async def _export_missing_md_channels(self, channels: List[ChannelInfo]):
         """Экспорт каналов без MD файлов"""
         try:
-            for channel in channels:
-                self.logger.info(f"Запуск экспорта для канала без MD файла: {channel.title}")
+            self.logger.info(f"Начало экспорта {len(channels)} каналов без MD файлов")
+            
+            for i, channel in enumerate(channels):
+                self.logger.info(f"Запуск экспорта для канала без MD файла: {channel.title} ({i+1}/{len(channels)})")
+                
+                # Обновляем информацию о текущем экспорте для авто-прокрутки
+                self.stats.current_export_info = f"Полный ре-экспорт {i+1}/{len(channels)}: {channel.title}"
                 
                 # Сбрасываем last_message_id чтобы загрузить все сообщения
                 original_last_id = channel.last_message_id
@@ -2651,8 +2694,19 @@ class TelegramExporter:
                     # Убираем флаг принудительного ре-экспорта
                     if hasattr(channel, '_force_full_reexport'):
                         delattr(channel, '_force_full_reexport')
+                    # Очищаем информацию о текущем экспорте между каналами
+                    self.stats.current_export_info = None
+                    # Небольшая пауза для обновления UI
+                    await asyncio.sleep(0.5)
+            
+            self.logger.info(f"Завершен экспорт {len(channels)} каналов без MD файлов")
+            # Окончательно очищаем информацию о экспорте
+            self.stats.current_export_info = None
         except Exception as e:
             self.logger.error(f"Ошибка экспорта каналов без MD файлов: {e}")
+        finally:
+            # Гарантируем очистку состояния
+            self.stats.current_export_info = None
     
     async def run(self):
         """Главный метод запуска программы"""
