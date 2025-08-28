@@ -80,6 +80,8 @@ class ExportStats:
     download_speed_files_per_sec: float = 0.0  # Текущая скорость в файлах/сек
     download_speed_mb_per_sec: float = 0.0     # Текущая скорость в МБ/сек
     remaining_files_to_download: int = 0       # Осталось файлов к скачиванию
+    discovered_messages: int = 0               # Общее количество обнаруженных сообщений
+    exported_messages: int = 0                 # Количество уже экспортированных сообщений
 
 
 class TelegramExporter:
@@ -1013,14 +1015,9 @@ class TelegramExporter:
             else:
                 last_check = "Никогда"
             
-            # Форматирование количества сообщений
+            # Форматирование количества сообщений (полное число без сокращений)
             msg_count = channel.total_messages
-            if msg_count >= 1000000:
-                msg_str = f"{msg_count//1000000}M"
-            elif msg_count >= 1000:
-                msg_str = f"{msg_count//1000}k"
-            else:
-                msg_str = str(msg_count)
+            msg_str = str(msg_count)
             
             channels_table.add_row(
                 channel_name,
@@ -1052,7 +1049,14 @@ class TelegramExporter:
         # Основная статистика
         stats_text.append("📊 Общая статистика\n\n", style="bold cyan")
         stats_text.append(f"Каналов: {self.stats.total_channels}\n", style="green")
-        stats_text.append(f"Сообщений: {self.stats.total_messages}\n", style="yellow")
+        
+        # Отображаем обнаруженные и экспортированные сообщения
+        if self.stats.discovered_messages > 0:
+            stats_text.append(f"Обнаружено сообщений: {self.stats.discovered_messages}\n", style="cyan")
+            stats_text.append(f"Экспортировано: {self.stats.exported_messages}\n", style="yellow")
+        else:
+            stats_text.append(f"Сообщений: {self.stats.total_messages}\n", style="yellow")
+        
         stats_text.append(f"Данных: {self.stats.total_size_mb:.1f} МБ\n", style="cyan")
         stats_text.append(f"Ошибок: {self.stats.export_errors}\n\n", style="red")
         
@@ -1097,6 +1101,50 @@ class TelegramExporter:
             stats_text.append(f"{self.stats.last_export_time}\n", style="blue")
         
         return stats_text
+
+    def _update_discovered_exported_stats(self):
+        """Обновляет статистику обнаруженных и экспортированных сообщений"""
+        try:
+            discovered = 0
+            exported = 0
+            
+            for channel in self.channels:
+                # Обнаруженные сообщения = total_messages из метаданных канала
+                discovered += channel.total_messages
+                
+                # Подсчитываем экспортированные сообщения из файлов экспорта
+                try:
+                    storage_cfg = self.config_manager.config.storage
+                    base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
+                except Exception:
+                    base_dir = 'exports'
+                
+                base_path = Path(base_dir)
+                sanitized_title = self._sanitize_channel_filename(channel.title)
+                channel_dir = base_path / sanitized_title
+                json_file = channel_dir / f"{sanitized_title}.json"
+                
+                if json_file.exists():
+                    try:
+                        with open(json_file, 'r', encoding='utf-8') as f:
+                            export_data = json.load(f)
+                        
+                        if isinstance(export_data, list):
+                            exported += len(export_data)
+                        elif isinstance(export_data, dict) and 'messages' in export_data:
+                            exported += len(export_data['messages'])
+                    except Exception as e:
+                        self.logger.debug(f"Error reading export file for {channel.title}: {e}")
+            
+            # Обновляем статистику
+            self.stats.discovered_messages = discovered
+            self.stats.exported_messages = exported
+            
+        except Exception as e:
+            self.logger.error(f"Error updating discovered/exported stats: {e}")
+            # При ошибке сбрасываем статистику
+            self.stats.discovered_messages = 0
+            self.stats.exported_messages = 0
 
     async def _post_loading_menu(self):
         """Меню дополнительных действий после загрузки каналов"""
@@ -1830,6 +1878,8 @@ class TelegramExporter:
                 await asyncio.sleep(0.5)
         
         self.stats.last_export_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Обновляем статистику обнаруженных/экспортированных сообщений
+        self._update_discovered_exported_stats()
         # Окончательно очищаем информацию о экспорте
         self.stats.current_export_info = None
     
@@ -2278,6 +2328,9 @@ class TelegramExporter:
             # Сбрасываем счетчик FloodWait попыток после успешного завершения
             self._floodwait_retry_count = 0
             
+            # Обновляем статистику обнаруженных/экспортированных сообщений
+            self._update_discovered_exported_stats()
+            
             # Сохранение обновленной информации о каналах
             self.save_channels()
             
@@ -2700,6 +2753,8 @@ class TelegramExporter:
                     await asyncio.sleep(0.5)
             
             self.logger.info(f"Завершен экспорт {len(channels)} каналов без MD файлов")
+            # Обновляем статистику обнаруженных/экспортированных сообщений
+            self._update_discovered_exported_stats()
             # Окончательно очищаем информацию о экспорте
             self.stats.current_export_info = None
         except Exception as e:
@@ -2796,6 +2851,9 @@ class TelegramExporter:
         # Обновление статистики
         self.stats.total_channels = len(self.channels)
         
+        # Обновляем статистику обнаруженных и экспортированных сообщений
+        self._update_discovered_exported_stats()
+        
         # Проверка целостности экспорта при запуске
         self.console.print("[yellow]Проверка целостности экспортов...[/yellow]")
         integrity_issues = 0
@@ -2815,6 +2873,9 @@ class TelegramExporter:
         
         # Сохраняем обновленную информацию о каналах после проверки целостности
         self.save_channels()
+        
+        # Обновляем статистику обнаруженных/экспортированных сообщений
+        self._update_discovered_exported_stats()
         
         if integrity_fixed > 0:
             self.console.print(f"[green]✓ Целостность восстановлена для {integrity_fixed} каналов[/green]")
