@@ -82,6 +82,10 @@ class ExportStats:
     remaining_files_to_download: int = 0       # Осталось файлов к скачиванию
     discovered_messages: int = 0               # Общее количество обнаруженных сообщений
     exported_messages: int = 0                 # Количество уже экспортированных сообщений
+    md_verification_status: Optional[str] = None  # Статус проверки MD файлов
+    md_verification_channel: Optional[str] = None  # Текущий канал проверки MD
+    md_reexport_count: int = 0                 # Количество повторных экспортов MD
+    md_verification_progress: Optional[str] = None  # Прогресс проверки MD файлов
 
 
 class TelegramExporter:
@@ -1095,6 +1099,37 @@ class TelegramExporter:
             
             stats_text.append("\n")  # Добавляем пустую строку после блока
         
+        # MD файл проверка и ре-экспорт
+        if (self.stats.md_verification_status or 
+            self.stats.md_verification_channel or 
+            self.stats.md_verification_progress or 
+            self.stats.md_reexport_count > 0):
+            
+            stats_text.append("📁 MD проверка\n\n", style="bold magenta")
+            
+            # Статус проверки
+            if self.stats.md_verification_status:
+                if "Ошибка" in self.stats.md_verification_status:
+                    stats_text.append(f"Статус: {self.stats.md_verification_status}\n", style="red")
+                elif "успешно" in self.stats.md_verification_status:
+                    stats_text.append(f"Статус: {self.stats.md_verification_status}\n", style="green")
+                else:
+                    stats_text.append(f"Статус: {self.stats.md_verification_status}\n", style="yellow")
+            
+            # Текущий канал проверки
+            if self.stats.md_verification_channel:
+                stats_text.append(f"Канал: {self.stats.md_verification_channel}\n", style="cyan")
+            
+            # Прогресс проверки
+            if self.stats.md_verification_progress:
+                stats_text.append(f"Прогресс: {self.stats.md_verification_progress}\n", style="blue")
+            
+            # Количество повторных экспортов
+            if self.stats.md_reexport_count > 0:
+                stats_text.append(f"Повторные экспорты: {self.stats.md_reexport_count}\n", style="orange1")
+            
+            stats_text.append("\n")  # Добавляем пустую строку после блока
+        
         # Последний экспорт
         if self.stats.last_export_time:
             stats_text.append("\n📅 Последний экспорт\n\n", style="bold blue")
@@ -1145,6 +1180,63 @@ class TelegramExporter:
             # При ошибке сбрасываем статистику
             self.stats.discovered_messages = 0
             self.stats.exported_messages = 0
+    
+    def _verify_md_file_count(self, channel: ChannelInfo) -> tuple[bool, int]:
+        """Проверяет количество сообщений в MD файле канала
+        
+        Args:
+            channel: Информация о канале для проверки
+            
+        Returns:
+            tuple[bool, int]: (Совпадает ли количество, фактическое количество сообщений в MD файле)
+        """
+        try:
+            # Получаем путь к MD файлу
+            try:
+                storage_cfg = self.config_manager.config.storage
+                base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
+            except Exception:
+                base_dir = 'exports'
+            
+            base_path = Path(base_dir)
+            sanitized_title = self._sanitize_channel_filename(channel.title)
+            channel_dir = base_path / sanitized_title
+            md_file = channel_dir / f"{sanitized_title}.md"
+            
+            # Проверяем существование MD файла
+            if not md_file.exists():
+                self.logger.warning(f"MD файл не найден для канала {channel.title}")
+                return False, 0
+            
+            # Читаем MD файл и подсчитываем количество сообщений
+            try:
+                with open(md_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Используем регулярное выражение для поиска заголовков сообщений
+                # Паттерн для поиска строк вида "## Сообщение #123" или "## Message #123"
+                message_pattern = r'^## (?:Сообщение|Message) #\d+'
+                messages_found = re.findall(message_pattern, content, re.MULTILINE)
+                actual_count = len(messages_found)
+                
+                # Сравниваем с ожидаемым количеством
+                expected_count = channel.total_messages
+                matches = (actual_count >= expected_count)  # Используем >= чтобы учесть возможные обновления
+                
+                if matches:
+                    self.logger.info(f"MD файл для {channel.title}: найдено {actual_count} сообщений, ожидалось {expected_count} - ОК")
+                else:
+                    self.logger.warning(f"MD файл для {channel.title}: найдено {actual_count} сообщений, ожидалось {expected_count} - НЕСООТВЕТСТВИЕ")
+                
+                return matches, actual_count
+                
+            except Exception as e:
+                self.logger.error(f"Ошибка чтения MD файла для {channel.title}: {e}")
+                return False, 0
+                
+        except Exception as e:
+            self.logger.error(f"Ошибка проверки MD файла для {channel.title}: {e}")
+            return False, 0
 
     async def _post_loading_menu(self):
         """Меню дополнительных действий после загрузки каналов"""
@@ -1888,6 +1980,11 @@ class TelegramExporter:
         try:
             self.logger.info(f"Starting export for channel: {channel.title}")
             
+            # Обнуляем счетчик повторных экспортов MD перед новым экспортом
+            if not hasattr(channel, '_force_full_reexport') or not channel._force_full_reexport:
+                # Сбрасываем счетчик только для новых экспортов (не для ре-экспортов)
+                self.stats.md_reexport_count = 0
+            
             # Обновляем информацию о текущем экспорте
             self.stats.current_export_info = f"Экспорт: {channel.title}"
             
@@ -1906,12 +2003,33 @@ class TelegramExporter:
             # Получение канала
             entity = await self.client.get_entity(channel.id)
             
+            # Проверяем наличие MD файла для принятия решения о режиме экспорта
+            md_file_path = channel_dir / f"{sanitized_title}.md"
+            md_file_missing = not md_file_path.exists()
+            
+            if md_file_missing:
+                self.logger.info(f"MD файл отсутствует для канала {channel.title}, запуск полного ре-экспорта с пересчетом сообщений")
+                # Игнорируем кэшированные параметры и принудительно пересчитываем
+                channel.last_message_id = 0
+                channel.total_messages = 0
+                # Отмечаем для принудительного полного экспорта
+                channel._force_full_reexport = True
+                # Обновляем статистику
+                self.stats.md_verification_status = "Обнаружен отсутствующий MD файл"
+                self.stats.md_verification_channel = channel.title
+                self.stats.md_verification_progress = "Подготовка к полному ре-экспорту"
+            
             # Получаем информацию о канале эффективно без полного подсчета сообщений
             total_messages_in_channel = 0
             try:
-                # При принудительном полном ре-экспорте получаем реальное количество сообщений
-                if hasattr(channel, '_force_full_reexport') and channel._force_full_reexport:
-                    self.logger.info(f"Принудительный полный ре-экспорт: подсчитываем реальное количество сообщений в {channel.title}")
+                # При принудительном полном ре-экспорте или отсутствии MD файла получаем реальное количество сообщений
+                if md_file_missing or (hasattr(channel, '_force_full_reexport') and channel._force_full_reexport):
+                    if md_file_missing:
+                        self.logger.info(f"Отсутствует MD файл: подсчитываем реальное количество сообщений в {channel.title}")
+                        self.stats.md_verification_progress = f"Подсчет сообщений в {channel.title}"
+                    else:
+                        self.logger.info(f"Принудительный полный ре-экспорт: подсчитываем реальное количество сообщений в {channel.title}")
+                    
                     # Получаем первое и последнее сообщения
                     first_msg = await self.client.get_messages(entity, limit=1, reverse=True)
                     last_msg = await self.client.get_messages(entity, limit=1)
@@ -1921,11 +2039,16 @@ class TelegramExporter:
                         async for _ in self.client.iter_messages(entity):
                             message_count += 1
                             if message_count % 1000 == 0:
+                                if md_file_missing:
+                                    self.stats.md_verification_progress = f"Подсчитано {message_count} сообщений в {channel.title}..."
                                 self.logger.info(f"Подсчитано {message_count} сообщений в {channel.title}...")
                         total_messages_in_channel = message_count
                         self.logger.info(f"Реальное количество сообщений в {channel.title}: {total_messages_in_channel}")
                         # Обновляем кэшированное значение
                         channel.total_messages = total_messages_in_channel
+                        
+                        if md_file_missing:
+                            self.stats.md_verification_progress = f"Обнаружено {total_messages_in_channel} сообщений, начало экспорта"
                     else:
                         self.logger.warning(f"Channel {channel.title}: Не удалось получить сообщения для подсчета")
                         total_messages_in_channel = 0
@@ -2276,6 +2399,60 @@ class TelegramExporter:
                 
                 self.logger.info(f"Successfully exported {len(messages_data)} messages from {channel.title}")
                 
+                # После-экспортная проверка MD файла и автоматический ре-экспорт
+                if md_file and Path(md_file).exists():
+                    self.logger.info(f"Проверка MD файла после экспорта для {channel.title}")
+                    self.stats.md_verification_status = "Проверка MD файла"
+                    self.stats.md_verification_channel = channel.title
+                    self.stats.md_verification_progress = "Проверка количества сообщений в MD файле"
+                    
+                    # Используем нашу функцию проверки
+                    md_matches, actual_md_count = self._verify_md_file_count(channel)
+                    
+                    if not md_matches:
+                        self.logger.warning(f"MD файл для {channel.title} содержит {actual_md_count} сообщений, ожидалось {channel.total_messages}. Запуск повторного экспорта")
+                        self.stats.md_reexport_count += 1
+                        self.stats.md_verification_progress = f"Несоответствие: {actual_md_count}/{channel.total_messages}, ре-экспорт #{self.stats.md_reexport_count}"
+                        
+                        # Проверяем максимальное количество попыток ре-экспорта
+                        max_reexport_attempts = 3
+                        if self.stats.md_reexport_count <= max_reexport_attempts:
+                            try:
+                                # Принудительно пересчитываем сообщения в канале заново
+                                self.logger.info(f"Повторный подсчет сообщений в {channel.title} для ре-экспорта")
+                                message_count = 0
+                                async for _ in self.client.iter_messages(entity):
+                                    message_count += 1
+                                    if message_count % 1000 == 0:
+                                        self.stats.md_verification_progress = f"Переподсчет: {message_count} сообщений..."
+                                
+                                # Обновляем общее количество сообщений
+                                self.logger.info(f"Обновленное количество сообщений в {channel.title}: {message_count}")
+                                channel.total_messages = message_count
+                                
+                                # Сбрасываем параметры для полного ре-экспорта
+                                channel.last_message_id = 0
+                                channel._force_full_reexport = True
+                                
+                                self.stats.md_verification_progress = f"Запуск повторного экспорта ({message_count} сообщений)"
+                                
+                                # Рекурсивный вызов экспорта для повторного экспорта
+                                await self.export_channel(channel)
+                                return  # Выходим чтобы избежать дублирования операций
+                                
+                            except Exception as e:
+                                self.logger.error(f"Ошибка повторного экспорта для {channel.title}: {e}")
+                                self.stats.export_errors += 1
+                        else:
+                            self.logger.error(f"Превышено максимальное количество попыток ре-экспорта для {channel.title} ({max_reexport_attempts})")
+                            self.stats.md_verification_status = "Ошибка: превышено макс. кол-во попыток"
+                    else:
+                        self.logger.info(f"MD файл для {channel.title} прошел проверку: {actual_md_count} сообщений")
+                        self.stats.md_verification_status = "Проверка пройдена успешно"
+                        self.stats.md_verification_progress = f"Подтверждено: {actual_md_count} сообщений"
+                else:
+                    self.logger.warning(f"MD файл не найден после экспорта для {channel.title}")
+                
             else:
                 self.logger.info(f"No new messages found in {channel.title}")
                 channel.last_check = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2331,7 +2508,20 @@ class TelegramExporter:
             # Обновляем статистику обнаруженных/экспортированных сообщений
             self._update_discovered_exported_stats()
             
-            # Сохранение обновленной информации о каналах
+            # Очищаем статус проверки MD файлов после успешного экспорта
+            if md_file_missing or self.stats.md_verification_status:
+                self.stats.md_verification_status = None
+                self.stats.md_verification_channel = None
+                self.stats.md_verification_progress = None
+                # Сбрасываем счетчик повторных экспортов после успешного завершения
+                self.stats.md_reexport_count = 0
+                self.logger.info(f"Экспорт для {channel.title} успешно завершен, MD проверка очищена")
+            
+            # Убираем флаг принудительного ре-экспорта
+            if hasattr(channel, '_force_full_reexport'):
+                delattr(channel, '_force_full_reexport')
+            
+            # Сохранение обновленной информации о каналах (включая last_message_id и total_messages)
             self.save_channels()
             
         except Exception as e:
