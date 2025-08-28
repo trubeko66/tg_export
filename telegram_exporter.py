@@ -2082,7 +2082,11 @@ class TelegramExporter:
                 html_file_path = html_exporter.output_dir / f"{html_exporter.sanitize_filename(html_exporter.channel_name)}.html" 
                 md_file_path = md_exporter.output_dir / f"{md_exporter.sanitize_filename(md_exporter.channel_name)}.md"
                 
-                if not json_file_path.exists() or not html_file_path.exists() or not md_file_path.exists():
+                # Проверяем, есть ли флаг принудительного полного ре-экспорта
+                if hasattr(channel, '_force_full_reexport') and channel._force_full_reexport:
+                    export_mode = "initial"
+                    self.logger.info(f"Forced full re-export mode for {channel.title} - recreating all files from scratch")
+                elif not json_file_path.exists() or not html_file_path.exists() or not md_file_path.exists():
                     export_mode = "initial"
                     self.logger.info(f"Initial export mode for {channel.title} - creating files from scratch")
                 
@@ -2267,6 +2271,8 @@ class TelegramExporter:
                 channel.last_message_id = 0
                 channel.total_messages = 0
                 channel.last_check = None
+                # Отмечаем, что при следующем экспорте нужно полностью переэкспортировать
+                channel._force_full_reexport = True
                 self.logger.info(f"Reset export state for channel {channel_title}: last_message_id {old_id} -> 0")
                 self.save_channels()
                 return True
@@ -2631,6 +2637,9 @@ class TelegramExporter:
                 original_last_id = channel.last_message_id
                 channel.last_message_id = 0
                 
+                # Отмечаем, что это принудительный полный ре-экспорт
+                channel._force_full_reexport = True
+                
                 try:
                     await self.export_channel(channel)
                     self.logger.info(f"Успешно экспортирован канал: {channel.title}")
@@ -2638,6 +2647,10 @@ class TelegramExporter:
                     self.logger.error(f"Ошибка экспорта канала {channel.title}: {e}")
                     # Восстанавливаем оригинальное значение при ошибке
                     channel.last_message_id = original_last_id
+                finally:
+                    # Убираем флаг принудительного ре-экспорта
+                    if hasattr(channel, '_force_full_reexport'):
+                        delattr(channel, '_force_full_reexport')
         except Exception as e:
             self.logger.error(f"Ошибка экспорта каналов без MD файлов: {e}")
     
