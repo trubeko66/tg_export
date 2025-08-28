@@ -421,8 +421,26 @@ class TelegramExporter:
             # Получение конфигурации из менеджера
             telegram_config = self.config_manager.get_telegram_config()
             
-            self.client = TelegramClient('session_name', telegram_config.api_id, telegram_config.api_hash)
-            await self.client.start(telegram_config.phone)
+            # Проверяем наличие и корректность API credentials
+            if not telegram_config or not telegram_config.api_id or not telegram_config.api_hash:
+                self.console.print("[red]Ошибка: не настроены API credentials для Telegram[/red]")
+                return False
+                
+            # Конвертируем api_id в int если нужно
+            api_id = int(telegram_config.api_id) if isinstance(telegram_config.api_id, str) else telegram_config.api_id
+            if not isinstance(api_id, int):
+                self.console.print("[red]Ошибка: API ID должен быть числом[/red]")
+                return False
+                
+            api_hash = str(telegram_config.api_hash)
+            phone = str(telegram_config.phone) if telegram_config.phone else None
+            
+            if not phone:
+                self.console.print("[red]Ошибка: не указан номер телефона[/red]")
+                return False
+                
+            self.client = TelegramClient('session_name', api_id, api_hash)
+            await self.client.start(phone=phone)
             
             if await self.client.is_user_authorized():
                 self.console.print("[green]✓ Успешная авторизация в Telegram[/green]")
@@ -911,11 +929,11 @@ class TelegramExporter:
     
     def _create_detailed_channels_table(self) -> Table:
         """Создает оптимизированную таблицу каналов для левой панели"""
-        channels_table = Table(box=box.ROUNDED, show_header=True, header_style="bold white")
-        channels_table.add_column("Канал", style="green", width=20, no_wrap=False)
-        channels_table.add_column("Проверка", style="blue", width=10, no_wrap=True)
-        channels_table.add_column("Мсг", style="yellow", justify="right", width=5, no_wrap=True)
-        channels_table.add_column("Статус", style="white", width=12, no_wrap=True)
+        channels_table = Table(box=box.ROUNDED, show_header=True, header_style="bold white", expand=True)
+        channels_table.add_column("Канал", style="green", no_wrap=False, ratio=3)
+        channels_table.add_column("Проверка", style="blue", no_wrap=True, ratio=2)
+        channels_table.add_column("Мсг", style="yellow", justify="right", no_wrap=True, ratio=1)
+        channels_table.add_column("Статус", style="white", no_wrap=True, ratio=2)
         
         if not self.channels:
             channels_table.add_row(
@@ -924,16 +942,19 @@ class TelegramExporter:
             )
             return channels_table
         
-        # Показываем все каналы или ограниченное количество
-        display_channels = self.channels[:15]  # Показываем первые 15 каналов
+        # Показываем все каналы или ограниченное количество для производительности
+        max_visible_channels = 20  # Увеличиваем количество отображаемых каналов
+        display_channels = self.channels[:max_visible_channels]
         
         for channel in display_channels:
             last_check = channel.last_check or "Никогда"
             
             # Определяем статус канала
             status = "Ожидание"
-            # Сокращаем имя для компактности
-            channel_name = channel.title[:18] + "..." if len(channel.title) > 18 else channel.title
+            # Более компактное имя для лучшего использования пространства
+            channel_name = channel.title
+            if len(channel_name) > 35:  # Увеличиваем допустимую длину
+                channel_name = channel_name[:32] + "..."
             
             if self.stats.current_export_info and channel.title in self.stats.current_export_info:
                 status = "[green]⚡ Экспорт[/green]"
@@ -949,13 +970,15 @@ class TelegramExporter:
                     dt = datetime.strptime(last_check, "%Y-%m-%d %H:%M:%S")
                     last_check = dt.strftime("%d.%m %H:%M")
                 except:
-                    last_check = last_check[:8] if len(last_check) > 8 else last_check
+                    last_check = last_check[:10] if len(last_check) > 10 else last_check
             else:
                 last_check = "Никогда"
             
-            # Компактное отображение количества сообщений
+            # Форматирование количества сообщений
             msg_count = channel.total_messages
-            if msg_count >= 1000:
+            if msg_count >= 1000000:
+                msg_str = f"{msg_count//1000000}M"
+            elif msg_count >= 1000:
                 msg_str = f"{msg_count//1000}k"
             else:
                 msg_str = str(msg_count)
@@ -967,10 +990,10 @@ class TelegramExporter:
                 status
             )
         
-        # Компактное отображение информации о количестве каналов
-        if len(self.channels) > 15:
+        # Информация о скрытых каналах
+        if len(self.channels) > max_visible_channels:
             channels_table.add_row(
-                f"[dim]...+{len(self.channels) - 15} кан.[/dim]",
+                f"[dim]...еще {len(self.channels) - max_visible_channels} каналов[/dim]",
                 "", "", ""
             )
         
@@ -1231,60 +1254,79 @@ class TelegramExporter:
             sanitized_title = self._sanitize_channel_filename(channel.title)
             channel_dir = base_path / sanitized_title
             
-            # Проверяем наличие JSON файла с данными
-            json_file = channel_dir / f"{sanitized_title}.json"
+            # Получаем все сообщения из Telegram API заново
+            self.console.print(f"[blue]Получение сообщений из Telegram для {channel.title}...[/blue]")
             
-            if not json_file.exists():
-                raise FileNotFoundError(f"Не найден JSON файл для канала {channel.title}")
-            
-            # Загружаем данные из JSON
-            with open(json_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            if 'messages' not in data or not isinstance(data['messages'], list):
-                raise ValueError(f"Некорректный формат JSON файла для {channel.title}")
-            
-            # Преобразуем данные сообщений в MessageData
-            messages_data = []
-            for msg_dict in data['messages']:
-                try:
-                    # Преобразуем даты
-                    msg_date = None
-                    if msg_dict.get('date'):
-                        msg_date = datetime.fromisoformat(msg_dict['date'].replace('Z', '+00:00'))
+            try:
+                # Получаем Telegram entity
+                entity = await self.client.get_entity(channel.id)
+                
+                # Получаем все сообщения канала
+                messages = []
+                message_count = 0
+                
+                async for message in self.client.iter_messages(entity, limit=None):
+                    # Фильтруем контент
+                    if self.content_filter.should_filter_message(message.text or ""):
+                        continue
+                        
+                    # Обрабатываем медиафайлы
+                    media_type = None
+                    media_path = None
                     
-                    edited_date = None
-                    if msg_dict.get('edited'):
-                        edited_date = datetime.fromisoformat(msg_dict['edited'].replace('Z', '+00:00'))
+                    if message.media:
+                        if isinstance(message.media, MessageMediaPhoto):
+                            media_type = "photo"
+                        elif isinstance(message.media, MessageMediaDocument):
+                            if message.document:
+                                if message.document.mime_type and message.document.mime_type.startswith('image/'):
+                                    media_type = "photo"
+                                elif message.document.mime_type and message.document.mime_type.startswith('video/'):
+                                    media_type = "video"
+                                else:
+                                    media_type = "document"
                     
+                    # Создаем MessageData
                     msg_data = MessageData(
-                        id=msg_dict.get('id', 0),
-                        date=msg_date,
-                        text=msg_dict.get('text', ''),
-                        author=msg_dict.get('author'),
-                        media_type=msg_dict.get('media_type'),
-                        media_path=msg_dict.get('media_path'),
-                        views=msg_dict.get('views', 0),
-                        forwards=msg_dict.get('forwards', 0),
-                        replies=msg_dict.get('replies', 0),
-                        edited=edited_date
+                        id=message.id,
+                        date=message.date,
+                        text=message.text or "",
+                        author=getattr(message.sender, 'username', None) if message.sender else None,
+                        media_type=media_type,
+                        media_path=media_path,
+                        views=getattr(message, 'views', 0) or 0,
+                        forwards=getattr(message, 'forwards', 0) or 0,
+                        replies=getattr(message, 'replies', {}).get('replies', 0) if hasattr(message, 'replies') and message.replies else 0,
+                        edited=message.edit_date
                     )
-                    messages_data.append(msg_data)
-                except Exception as e:
-                    self.logger.warning(f"Error parsing message data: {e}")
-                    continue
-            
-            if not messages_data:
-                raise ValueError(f"Не удалось загрузить сообщения для {channel.title}")
-            
-            # Создаем Markdown экспортер и перезаписываем файл
-            md_exporter = MarkdownExporter(channel.title, channel_dir)
-            md_file = md_exporter.export_messages(messages_data, append_mode=False)  # append_mode=False для перезаписи
-            
-            if md_file and Path(md_file).exists():
-                self.logger.info(f"Successfully reexported {channel.title} to Markdown: {md_file}")
-            else:
-                raise RuntimeError(f"Не удалось создать Markdown файл для {channel.title}")
+                    messages.append(msg_data)
+                    message_count += 1
+                    
+                    # Показываем прогресс каждые 100 сообщений
+                    if message_count % 100 == 0:
+                        self.console.print(f"[green]Обработано {message_count} сообщений...[/green]")
+                
+                self.console.print(f"[green]Получено {len(messages)} сообщений для реэкспорта[/green]")
+                
+                if not messages:
+                    raise ValueError(f"Не найдено сообщений для реэкспорта канала {channel.title}")
+                
+                # Сортируем сообщения по ID (старые сначала)
+                messages.sort(key=lambda x: x.id)
+                
+                # Создаем Markdown экспортер и перезаписываем файл
+                md_exporter = MarkdownExporter(channel.title, channel_dir)
+                md_file = md_exporter.export_messages(messages, append_mode=False)  # append_mode=False для перезаписи
+                
+                if md_file and Path(md_file).exists():
+                    self.logger.info(f"Successfully reexported {channel.title} to Markdown: {md_file}")
+                    self.console.print(f"[green]✓ Переэкспорт в Markdown завершен: {md_file}[/green]")
+                else:
+                    raise RuntimeError(f"Не удалось создать Markdown файл для {channel.title}")
+                    
+            except Exception as e:
+                self.logger.error(f"Error getting messages from Telegram for {channel.title}: {e}")
+                raise
             
         except Exception as e:
             self.logger.error(f"Error reexporting {channel.title} to Markdown: {e}")
@@ -1418,77 +1460,96 @@ class TelegramExporter:
             sanitized_title = self._sanitize_channel_filename(channel.title)
             channel_dir = base_path / sanitized_title
             
-            # Проверяем наличие JSON файла с данными
-            json_file = channel_dir / f"{sanitized_title}.json"
+            # Получаем все сообщения из Telegram API заново
+            self.console.print(f"[blue]Получение сообщений из Telegram для {channel.title}...[/blue]")
             
-            if not json_file.exists():
-                raise FileNotFoundError(f"Не найден JSON файл для канала {channel.title}")
-            
-            # Загружаем данные из JSON
-            with open(json_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            if 'messages' not in data or not isinstance(data['messages'], list):
-                raise ValueError(f"Некорректный формат JSON файла для {channel.title}")
-            
-            # Преобразуем данные сообщений в MessageData
-            messages_data = []
-            for msg_dict in data['messages']:
-                try:
-                    # Преобразуем даты
-                    msg_date = None
-                    if msg_dict.get('date'):
-                        msg_date = datetime.fromisoformat(msg_dict['date'].replace('Z', '+00:00'))
+            try:
+                # Получаем Telegram entity
+                entity = await self.client.get_entity(channel.id)
+                
+                # Получаем все сообщения канала
+                messages = []
+                message_count = 0
+                
+                async for message in self.client.iter_messages(entity, limit=None):
+                    # Фильтруем контент
+                    if self.content_filter.should_filter_message(message.text or ""):
+                        continue
+                        
+                    # Обрабатываем медиафайлы
+                    media_type = None
+                    media_path = None
                     
-                    edited_date = None
-                    if msg_dict.get('edited'):
-                        edited_date = datetime.fromisoformat(msg_dict['edited'].replace('Z', '+00:00'))
+                    if message.media:
+                        if isinstance(message.media, MessageMediaPhoto):
+                            media_type = "photo"
+                        elif isinstance(message.media, MessageMediaDocument):
+                            if message.document:
+                                if message.document.mime_type and message.document.mime_type.startswith('image/'):
+                                    media_type = "photo"
+                                elif message.document.mime_type and message.document.mime_type.startswith('video/'):
+                                    media_type = "video"
+                                else:
+                                    media_type = "document"
                     
+                    # Создаем MessageData
                     msg_data = MessageData(
-                        id=msg_dict.get('id', 0),
-                        date=msg_date,
-                        text=msg_dict.get('text', ''),
-                        author=msg_dict.get('author'),
-                        media_type=msg_dict.get('media_type'),
-                        media_path=msg_dict.get('media_path'),
-                        views=msg_dict.get('views', 0),
-                        forwards=msg_dict.get('forwards', 0),
-                        replies=msg_dict.get('replies', 0),
-                        edited=edited_date
+                        id=message.id,
+                        date=message.date,
+                        text=message.text or "",
+                        author=getattr(message.sender, 'username', None) if message.sender else None,
+                        media_type=media_type,
+                        media_path=media_path,
+                        views=getattr(message, 'views', 0) or 0,
+                        forwards=getattr(message, 'forwards', 0) or 0,
+                        replies=getattr(message, 'replies', {}).get('replies', 0) if hasattr(message, 'replies') and message.replies else 0,
+                        edited=message.edit_date
                     )
-                    messages_data.append(msg_data)
-                except Exception as e:
-                    self.logger.warning(f"Error parsing message data: {e}")
-                    continue
-            
-            if not messages_data:
-                raise ValueError(f"Не удалось загрузить сообщения для {channel.title}")
-            
-            # Экспортируем в JSON (перезаписываем)
-            json_exporter = JSONExporter(channel.title, channel_dir)
-            json_file = json_exporter.export_messages(messages_data, append_mode=False)
-            
-            # Экспортируем в HTML (перезаписываем)
-            html_exporter = HTMLExporter(channel.title, channel_dir)
-            html_file = html_exporter.export_messages(messages_data, append_mode=False)
-            
-            # Экспортируем в Markdown (перезаписываем)
-            md_exporter = MarkdownExporter(channel.title, channel_dir)
-            md_file = md_exporter.export_messages(messages_data, append_mode=False)
-            
-            # Проверяем успешность экспорта
-            files_created = []
-            if json_file and Path(json_file).exists():
-                files_created.append("JSON")
-            if html_file and Path(html_file).exists():
-                files_created.append("HTML")
-            if md_file and Path(md_file).exists():
-                files_created.append("Markdown")
-            
-            if files_created:
-                self.logger.info(f"Successfully reexported {channel.title} to formats: {', '.join(files_created)}")
-            else:
-                raise RuntimeError(f"Не удалось создать файлы экспорта для {channel.title}")
+                    messages.append(msg_data)
+                    message_count += 1
+                    
+                    # Показываем прогресс каждые 100 сообщений
+                    if message_count % 100 == 0:
+                        self.console.print(f"[green]Обработано {message_count} сообщений...[/green]")
+                
+                self.console.print(f"[green]Получено {len(messages)} сообщений для реэкспорта[/green]")
+                
+                if not messages:
+                    raise ValueError(f"Не найдено сообщений для реэкспорта канала {channel.title}")
+                
+                # Сортируем сообщения по ID (старые сначала)
+                messages.sort(key=lambda x: x.id)
+                
+                # Экспортируем в JSON (перезаписываем)
+                json_exporter = JSONExporter(channel.title, channel_dir)
+                json_file = json_exporter.export_messages(messages, append_mode=False)
+                
+                # Экспортируем в HTML (перезаписываем)
+                html_exporter = HTMLExporter(channel.title, channel_dir)
+                html_file = html_exporter.export_messages(messages, append_mode=False)
+                
+                # Экспортируем в Markdown (перезаписываем)
+                md_exporter = MarkdownExporter(channel.title, channel_dir)
+                md_file = md_exporter.export_messages(messages, append_mode=False)
+                
+                # Проверяем успешность экспорта
+                files_created = []
+                if json_file and Path(json_file).exists():
+                    files_created.append("JSON")
+                if html_file and Path(html_file).exists():
+                    files_created.append("HTML")
+                if md_file and Path(md_file).exists():
+                    files_created.append("Markdown")
+                
+                if files_created:
+                    self.logger.info(f"Successfully reexported {channel.title} to formats: {', '.join(files_created)}")
+                    self.console.print(f"[green]✓ Переэкспорт завершен: {', '.join(files_created)}[/green]")
+                else:
+                    raise RuntimeError(f"Не удалось создать файлы экспорта для {channel.title}")
+                    
+            except Exception as e:
+                self.logger.error(f"Error getting messages from Telegram for {channel.title}: {e}")
+                raise
             
         except Exception as e:
             self.logger.error(f"Error reexporting {channel.title} to all formats: {e}")
