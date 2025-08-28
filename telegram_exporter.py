@@ -1819,7 +1819,7 @@ class TelegramExporter:
             should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
             if should_filter:
                 self.logger.info(f"Message {message.id} filtered: {filter_reason}")
-                self.stats.filtered_messages += 1
+                session_filtered_count += 1
                 return None
 
             # Загрузка медиафайлов (только если не режим "только сообщения")
@@ -2036,16 +2036,19 @@ class TelegramExporter:
                     if first_msg and last_msg and len(first_msg) > 0 and len(last_msg) > 0:
                         # Получаем точное количество сообщений через подсчет
                         message_count = 0
-                        async for _ in self.client.iter_messages(entity):
+                        messages_to_export = []  # Сохраняем сообщения для последующей обработки
+                        async for message in self.client.iter_messages(entity):
                             message_count += 1
+                            messages_to_export.append(message)
                             if message_count % 1000 == 0:
                                 if md_file_missing:
                                     self.stats.md_verification_progress = f"Подсчитано {message_count} сообщений в {channel.title}..."
                                 self.logger.info(f"Подсчитано {message_count} сообщений в {channel.title}...")
                         total_messages_in_channel = message_count
                         self.logger.info(f"Реальное количество сообщений в {channel.title}: {total_messages_in_channel}")
-                        # Обновляем кэшированное значение
-                        channel.total_messages = total_messages_in_channel
+                        # Обновляем кэшированное значение - только при отсутствии MD файла или принудительном реэкспорте
+                        if md_file_missing or (hasattr(channel, '_force_full_reexport') and channel._force_full_reexport):
+                            channel.total_messages = total_messages_in_channel
                         
                         if md_file_missing:
                             self.stats.md_verification_progress = f"Обнаружено {total_messages_in_channel} сообщений, начало экспорта"
@@ -2110,80 +2113,154 @@ class TelegramExporter:
             total_size = 0.0
             new_messages_count = 0
             
+            # Инициализируем счетчик отфильтрованных сообщений для текущей сессии экспорта
+            session_filtered_count = 0
+            
             # Получаем сообщения начиная с последнего обработанного
             min_id = channel.last_message_id
+            messages_to_process = None  # Для хранения сообщений при полном реэкспорте
             
             # Если last_message_id = 0, значит это первая проверка канала - экспортируем все сообщения
             if min_id == 0:
                 self.logger.info(f"First time export for channel {channel.title} - will export all {total_messages_in_channel} messages")
-                min_id = None  # None означает "с самого начала"
+                # При полном реэкспорте используем уже собранные сообщения
+                if 'messages_to_export' in locals():
+                    messages_to_process = messages_to_export
+                    min_id = None  # Помечаем что используем предварительно собранные сообщения
+                else:
+                    min_id = None  # None означает "с самого начала"
             else:
                 self.logger.info(f"Exporting new messages for channel {channel.title} starting from message ID {min_id}")
             
             try:
                 # Используем правильный параметр для получения сообщений
                 if min_id is None:
-                    # Получаем все сообщения с самого начала
-                    async for message in self.client.iter_messages(entity):
-                        try:
-                            # Обновляем прогресс экспорта
-                            self.stats.current_export_info = f"Экспорт: {channel.title} | Обработано {len(messages_data)} из {total_messages_in_channel}"
-                            
-                            # Фильтрация рекламных и промо-сообщений
-                            should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
-                            if should_filter:
-                                self.logger.info(f"Message {message.id} filtered: {filter_reason}")
-                                self.stats.filtered_messages += 1
-                                continue
+                    # При полном реэкспорте используем уже собранные сообщения
+                    if messages_to_process is not None:
+                        self.logger.info(f"Processing {len(messages_to_process)} pre-collected messages for full re-export")
+                        for message in messages_to_process:
+                            try:
+                                # Обновляем прогресс экспорта
+                                self.stats.current_export_info = f"Экспорт: {channel.title} | Обработано {len(messages_data)} из {total_messages_in_channel}"
+                                
+                                # Фильтрация рекламных и промо-сообщений
+                                should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
+                                if should_filter:
+                                    self.logger.info(f"Message {message.id} filtered: {filter_reason}")
+                                    session_filtered_count += 1
+                                    continue
 
-                            # Загрузка медиафайлов
-                            media_path = None
-                            media_type = None
-                            
-                            if message.media:
-                                # Добавляем в очередь загрузки вместо немедленной загрузки
-                                media_path = media_downloader.add_to_download_queue(self.client, message)
+                                # Загрузка медиафайлов
+                                media_path = None
+                                media_type = None
                                 
-                                # Определение типа медиа
-                                if isinstance(message.media, MessageMediaPhoto):
-                                    media_type = "Фото"
-                                elif isinstance(message.media, MessageMediaDocument):
-                                    media_type = "Документ"
-                                else:
-                                    media_type = "Другое медиа"
-                            
-                            # Создание объекта данных сообщения
-                            # Безопасное получение количества ответов
-                            replies_count = 0
-                            if hasattr(message, 'replies') and message.replies:
-                                if hasattr(message.replies, 'replies'):
-                                    replies_count = message.replies.replies
-                                elif hasattr(message.replies, 'replies_pts'):
-                                    replies_count = getattr(message.replies, 'replies_pts', 0)
-                            
-                            msg_data = MessageData(
-                                id=message.id,
-                                date=message.date,
-                                text=message.text or "",
-                                author=None,  # Каналы обычно не показывают авторов
-                                media_type=media_type,
-                                media_path=media_path,
-                                views=getattr(message, 'views', 0) or 0,
-                                forwards=getattr(message, 'forwards', 0) or 0,
-                                replies=replies_count,
-                                edited=message.edit_date
-                            )
-                            
-                            messages_data.append(msg_data)
-                            new_messages_count += 1
-                            
-                            # Обновляем последний ID сообщения
-                            if message.id > channel.last_message_id:
-                                channel.last_message_id = message.id
+                                if message.media:
+                                    # Добавляем в очередь загрузки вместо немедленной загрузки
+                                    media_path = media_downloader.add_to_download_queue(self.client, message)
+                                    
+                                    # Определение типа медиа
+                                    if isinstance(message.media, MessageMediaPhoto):
+                                        media_type = "Фото"
+                                    elif isinstance(message.media, MessageMediaDocument):
+                                        media_type = "Документ"
+                                    else:
+                                        media_type = "Другое медиа"
                                 
-                        except Exception as e:
-                            self.logger.error(f"Error processing message {message.id}: {e}")
-                            self.stats.export_errors += 1
+                                # Создание объекта данных сообщения
+                                # Безопасное получение количества ответов
+                                replies_count = 0
+                                if hasattr(message, 'replies') and message.replies:
+                                    if hasattr(message.replies, 'replies'):
+                                        replies_count = message.replies.replies
+                                    elif hasattr(message.replies, 'replies_pts'):
+                                        replies_count = getattr(message.replies, 'replies_pts', 0)
+                                
+                                msg_data = MessageData(
+                                    id=message.id,
+                                    date=message.date,
+                                    text=message.text or "",
+                                    author=None,  # Каналы обычно не показывают авторов
+                                    media_type=media_type,
+                                    media_path=media_path,
+                                    views=getattr(message, 'views', 0) or 0,
+                                    forwards=getattr(message, 'forwards', 0) or 0,
+                                    replies=replies_count,
+                                    edited=message.edit_date
+                                )
+                                
+                                messages_data.append(msg_data)
+                                new_messages_count += 1
+                                
+                                # Обновляем последний ID сообщения
+                                if message.id > channel.last_message_id:
+                                    channel.last_message_id = message.id
+                                    
+                            except Exception as e:
+                                self.logger.error(f"Error processing message {message.id}: {e}")
+                                self.stats.export_errors += 1
+                    else:
+                        # Получаем все сообщения с самого начала (старая логика)
+                        async for message in self.client.iter_messages(entity):
+                            try:
+                                # Обновляем прогресс экспорта
+                                self.stats.current_export_info = f"Экспорт: {channel.title} | Обработано {len(messages_data)} из {total_messages_in_channel}"
+                                
+                                # Фильтрация рекламных и промо-сообщений
+                                # Фильтрация рекламных и промо-сообщений
+                                should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
+                                if should_filter:
+                                    self.logger.info(f"Message {message.id} filtered: {filter_reason}")
+                                    session_filtered_count += 1
+                                    continue
+
+                                # Загрузка медиафайлов
+                                media_path = None
+                                media_type = None
+                                
+                                if message.media:
+                                    # Добавляем в очередь загрузки вместо немедленной загрузки
+                                    media_path = media_downloader.add_to_download_queue(self.client, message)
+                                    
+                                    # Определение типа медиа
+                                    if isinstance(message.media, MessageMediaPhoto):
+                                        media_type = "Фото"
+                                    elif isinstance(message.media, MessageMediaDocument):
+                                        media_type = "Документ"
+                                    else:
+                                        media_type = "Другое медиа"
+                                
+                                # Создание объекта данных сообщения
+                                # Безопасное получение количества ответов
+                                replies_count = 0
+                                if hasattr(message, 'replies') and message.replies:
+                                    if hasattr(message.replies, 'replies'):
+                                        replies_count = message.replies.replies
+                                    elif hasattr(message.replies, 'replies_pts'):
+                                        replies_count = getattr(message.replies, 'replies_pts', 0)
+                                
+                                msg_data = MessageData(
+                                    id=message.id,
+                                    date=message.date,
+                                    text=message.text or "",
+                                    author=None,  # Каналы обычно не показывают авторов
+                                    media_type=media_type,
+                                    media_path=media_path,
+                                    views=getattr(message, 'views', 0) or 0,
+                                    forwards=getattr(message, 'forwards', 0) or 0,
+                                    replies=replies_count,
+                                    edited=message.edit_date
+                                )
+                                
+                                messages_data.append(msg_data)
+                                new_messages_count += 1
+                                
+                                # Обновляем последний ID сообщения
+                                if message.id > channel.last_message_id:
+                                    channel.last_message_id = message.id
+                                    
+                            except Exception as e:
+                                self.logger.error(f"Error processing message {message.id}: {e}")
+                                self.stats.export_errors += 1
                 else:
                     # Получаем только новые сообщения
                     async for message in self.client.iter_messages(entity, min_id=min_id):
@@ -2195,7 +2272,7 @@ class TelegramExporter:
                             should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
                             if should_filter:
                                 self.logger.info(f"Message {message.id} filtered: {filter_reason}")
-                                self.stats.filtered_messages += 1
+                                session_filtered_count += 1
                                 continue
 
                             # Загрузка медиафайлов
@@ -2374,13 +2451,18 @@ class TelegramExporter:
                 
                 self.logger.info(f"Export files created for {channel.title}: {', '.join(export_files_created)}")
                 
-                # Обновление статистики канала
-                channel.total_messages += len(messages_data)
+                # Обновление статистики канала - только при инкрементальном экспорте
+                # При полном ре-экспорте total_messages уже установлен правильно выше
+                if not (hasattr(channel, '_force_full_reexport') and channel._force_full_reexport):
+                    channel.total_messages += len(messages_data)
                 channel.last_check = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
                 # Обновление общей статистики
+                # Обновление общей статистики
                 self.stats.total_messages += len(messages_data)
                 self.stats.total_size_mb += total_size
+                # Добавляем отфильтрованные сообщения из текущей сессии к общей статистике
+                self.stats.filtered_messages += session_filtered_count
                 
                 # Отправка уведомления
                 if new_messages_count > 0:
@@ -2421,13 +2503,15 @@ class TelegramExporter:
                                 # Принудительно пересчитываем сообщения в канале заново
                                 self.logger.info(f"Повторный подсчет сообщений в {channel.title} для ре-экспорта")
                                 message_count = 0
-                                async for _ in self.client.iter_messages(entity):
+                                async for message in self.client.iter_messages(entity):
                                     message_count += 1
                                     if message_count % 1000 == 0:
                                         self.stats.md_verification_progress = f"Переподсчет: {message_count} сообщений..."
                                 
-                                # Обновляем общее количество сообщений
+                                # Обновляем общее количество сообщений - только если оно действительно изменилось
                                 self.logger.info(f"Обновленное количество сообщений в {channel.title}: {message_count}")
+                                # Сохраняем старое значение для сравнения
+                                old_total = channel.total_messages
                                 channel.total_messages = message_count
                                 
                                 # Сбрасываем параметры для полного ре-экспорта
