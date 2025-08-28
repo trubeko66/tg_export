@@ -668,7 +668,7 @@ class MarkdownExporter(BaseExporter):
         def protect_multiline_code(match):
             nonlocal code_counter
             code_blocks.append(match.group(0))
-            placeholder = f"__CODE_BLOCK_{code_counter}__"
+            placeholder = f"MDCODEBLOCK{code_counter}PLACEHOLDER"
             code_counter += 1
             return placeholder
         
@@ -676,7 +676,7 @@ class MarkdownExporter(BaseExporter):
         def protect_inline_code(match):
             nonlocal code_counter
             code_blocks.append(match.group(0))
-            placeholder = f"__CODE_BLOCK_{code_counter}__"
+            placeholder = f"MDCODEBLOCK{code_counter}PLACEHOLDER"
             code_counter += 1
             return placeholder
         
@@ -690,7 +690,7 @@ class MarkdownExporter(BaseExporter):
         # НЕ экранируем обратные кавычки, так как они нужны для блоков кода
         safe_replacements = [
             ('*', '\\*'),      # Звездочки для выделения
-            ('_', '\\_'),      # Подчеркивания для выделения
+            ('_', '\\_'),      # Подчеркивания для выделения (не затронет плейсхолдеры)
             ('[', '\\['),      # Квадратные скобки для ссылок
             (']', '\\]'),      # Квадратные скобки для ссылок
         ]
@@ -703,7 +703,7 @@ class MarkdownExporter(BaseExporter):
         
         # Восстанавливаем защищенные блоки кода
         for i, code_block in enumerate(code_blocks):
-            placeholder = f"__CODE_BLOCK_{i}__"
+            placeholder = f"MDCODEBLOCK{i}PLACEHOLDER"
             cleaned = cleaned.replace(placeholder, code_block)
         
         return cleaned
