@@ -831,108 +831,7 @@ class TelegramExporter:
         layout["footer"].update(Panel(footer_content, box=box.ROUNDED))
         
         return layout
-    
-    def _calculate_channel_media_size(self, channel: ChannelInfo) -> float:
-        """Вычисляет размер медиафайлов для канала в МБ"""
-        if channel.media_size_mb > 0:
-            return channel.media_size_mb  # Используем кэшированное значение
-        
-        try:
-            storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
-            export_base_dir = Path(self.config_manager.config.storage.export_base_dir or "exports")
-            sanitized_title = self._sanitize_channel_filename(channel.title)
-            channel_dir = export_base_dir / sanitized_title
-            media_dir = channel_dir / "media"
-            
-            if not media_dir.exists():
-                size_mb = 0.0
-            else:
-                total_size = 0
-                media_files = 0
-                
-                # Оптимизированный подсчет с использованием iterdir для лучшей производительности
-                try:
-                    for file_path in media_dir.iterdir():
-                        if file_path.is_file():
-                            try:
-                                file_size = file_path.stat().st_size
-                                if file_size > 0:  # Игнорируем файлы нулевого размера
-                                    total_size += file_size
-                                    media_files += 1
-                            except (OSError, IOError, PermissionError):
-                                # Пропускаем файлы, к которым нет доступа
-                                continue
-                except (OSError, IOError, PermissionError):
-                    # Если нет доступа к директории
-                    total_size = 0
-                
-                size_mb = total_size / (1024 * 1024)  # Конвертируем в МБ
-            
-            # Кэшируем размер для будущих вызовов
-            channel.media_size_mb = size_mb
-            return size_mb
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating media size for {channel.title}: {e}")
-            return 0.0
-    
-    def _create_scrollable_channels_table(self) -> Table:
-        """Создает прокручиваемую таблицу каналов"""
-        channels_table = Table(box=box.ROUNDED)
-        channels_table.add_column("Канал", style="green")
-        channels_table.add_column("Последняя проверка", style="blue")
-        channels_table.add_column("Сообщений", style="yellow", justify="right")
-        channels_table.add_column("Объем файлов", style="cyan", justify="right")
-        
-        # Определяем диапазон для отображения
-        start_idx = self.channels_scroll_offset
-        end_idx = min(start_idx + self.channels_display_limit, len(self.channels))
-        
-        for i in range(start_idx, end_idx):
-            channel = self.channels[i]
-            last_check = channel.last_check or "Никогда"
-            
-            # Вычисляем объем скачанных медиафайлов для канала
-            channel_size = self._calculate_channel_media_size(channel)
-            
-            # Форматируем размер файлов с улучшенной точностью
-            if channel_size > 0:
-                if channel_size >= 1024:
-                    # Гигабайты
-                    size_str = f"{channel_size/1024:.2f} ГБ"
-                elif channel_size >= 1:
-                    # Мегабайты
-                    size_str = f"{channel_size:.1f} МБ"
-                else:
-                    # Килобайты для небольших размеров
-                    size_kb = channel_size * 1024
-                    size_str = f"{size_kb:.0f} КБ"
-            else:
-                size_str = "—"
-            
-            # Отмечаем текущий канал (если идет экспорт)
-            channel_name = channel.title[:30] + "..." if len(channel.title) > 30 else channel.title
-            if self.stats.current_export_info and channel.title in self.stats.current_export_info:
-                channel_name = f"▶ {channel_name}"  # Маркер текущего экспорта
-            
-            channels_table.add_row(
-                channel_name,
-                last_check,
-                str(channel.total_messages),
-                size_str
-            )
-        
-        # Добавляем информацию о прокрутке если каналов больше лимита
-        if len(self.channels) > self.channels_display_limit:
-            total_pages = (len(self.channels) - 1) // self.channels_display_limit + 1
-            current_page = self.channels_scroll_offset // self.channels_display_limit + 1
-            channels_table.add_row(
-                f"[dim]——— Страница {current_page}/{total_pages} ———[/dim]",
-                "", "", ""
-            )
-        
-        return channels_table
-    
+
     def _create_detailed_channels_table(self) -> Table:
         """Создает оптимизированную таблицу каналов для левой панели"""
         channels_table = Table(
@@ -2198,6 +2097,20 @@ class TelegramExporter:
                             except Exception as e:
                                 self.logger.error(f"Error processing message {message.id}: {e}")
                                 self.stats.export_errors += 1
+                else:
+                    # Получаем только новые сообщения
+                    async for message in self.client.iter_messages(entity, min_id=min_id):
+                        try:
+                            # Обновляем прогресс экспорта
+                            self.stats.current_export_info = f"Экспорт: {channel.title} | Обработано {len(messages_data)} из {total_messages_in_channel}"
+                            
+                            # Фильтрация рекламных и промо-сообщений
+                            should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
+                            if should_filter:
+                                self.logger.info(f"Message {message.id} filtered: {filter_reason}")
+                                session_filtered_count += 1
+                                continue
+
                     else:
                         # Получаем все сообщения с самого начала (старая логика)
                         async for message in self.client.iter_messages(entity):
