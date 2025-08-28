@@ -935,7 +935,6 @@ class TelegramExporter:
             header_style="bold white", 
             expand=True,
             min_width=60,  # Минимальная ширина
-            height=None,   # Позволяем автоматическое растягивание по высоте
             collapse_padding=True  # Уменьшаем отступы для экономии места
         )
         channels_table.add_column("Канал", style="green", no_wrap=False, ratio=3)
