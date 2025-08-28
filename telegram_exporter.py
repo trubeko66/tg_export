@@ -2248,35 +2248,20 @@ class TelegramExporter:
                                     views=getattr(message, 'views', 0) or 0,
                                     forwards=getattr(message, 'forwards', 0) or 0,
                                     replies=replies_count,
-                                    edited=message.edit_date
-                                )
-                                
-                                messages_data.append(msg_data)
-                                new_messages_count += 1
-                                
-                                # Обновляем последний ID сообщения
-                                if message.id > channel.last_message_id:
-                                    channel.last_message_id = message.id
-                                    
-                            except Exception as e:
-                                self.logger.error(f"Error processing message {message.id}: {e}")
-                                self.stats.export_errors += 1
-                else:
-                    # Получаем только новые сообщения
-                    async for message in self.client.iter_messages(entity, min_id=min_id):
-                        try:
-                            # Обновляем прогресс экспорта
-                            self.stats.current_export_info = f"Экспорт: {channel.title} | Обработано {len(messages_data)} из {total_messages_in_channel}"
-                            
-                            # Фильтрация рекламных и промо-сообщений
-                            should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
-                            if should_filter:
-                                self.logger.info(f"Message {message.id} filtered: {filter_reason}")
-                                session_filtered_count += 1
-                                continue
-
-                            # Загрузка медиафайлов
-                            media_path = None
+    async def _process_single_message(self, message: Message, channel: ChannelInfo, media_downloader) -> Optional[MessageData]:
+        """Обработка одного сообщения с учетом типа экспорта"""
+        try:
+            # Проверяем тип экспорта - если только файлы, пропускаем сообщения без медиа
+            if channel.export_type == ExportType.FILES_ONLY and not message.media:
+                return None
+                
+            # Фильтрация рекламных и промо-сообщений
+            should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
+            if should_filter:
+                self.logger.info(f"Message {message.id} filtered: {filter_reason}")
+                # Note: We don't increment session_filtered_count here because this function
+                # is used in contexts outside the main export session (e.g., integrity verification)
+                return None
                             media_type = None
                             
                             if message.media:

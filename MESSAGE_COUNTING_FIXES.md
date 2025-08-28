@@ -25,7 +25,7 @@
 1. **Первый подсчет**: При определении `total_messages_in_channel` программа подсчитывала все сообщения в канале
 2. **Второй подсчет**: При обработке сообщений для экспорта те же сообщения обрабатывались снова
 3. **Неправильное обновление статистики**: `channel.total_messages` увеличивался на количество обработанных сообщений, даже при полном ре-экспорте
-4. **Накопление отфильтрованных сообщений**: Глобальный счетчик `filtered_messages` накапливался между экспортами
+4. **Накопление отфильтрованных сообщений**: Глобальный счетчик `self.stats.filtered_messages` накапливался между экспортами
 
 ## Внесенные изменения
 
@@ -85,6 +85,27 @@ self.stats.filtered_messages += session_filtered_count
 ```
 
 Это предотвращает накопление отфильтрованных сообщений между экспортами.
+
+### 5. Исправление функции _process_single_message
+
+Функция [_process_single_message](file:///C:/Users/trubeko/tg_export-1/telegram_exporter.py#L1794-L1843) была исправлена для корректной работы в разных контекстах:
+
+```python
+# Ранее:
+should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
+if should_filter:
+    self.logger.info(f"Message {message.id} filtered: {filter_reason}")
+    session_filtered_count += 1
+    return None
+
+# Исправлено:
+should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
+if should_filter:
+    self.logger.info(f"Message {message.id} filtered: {filter_reason}")
+    # Note: We don't increment session_filtered_count here because this function
+    # is used in contexts outside the main export session (e.g., integrity verification)
+    return None
+```
 
 ## Результат
 
