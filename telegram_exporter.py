@@ -941,7 +941,7 @@ class TelegramExporter:
         
         if not self.channels:
             channels_table.add_row(
-                "[дим]Каналы не выбраны[/дим]",
+                "[dim]Каналы не выбраны[/dim]",
                 "", "", "", "", ""
             )
             return channels_table
@@ -1001,12 +1001,12 @@ class TelegramExporter:
             channel_name = channel.title[:35] + "..." if len(channel.title) > 35 else channel.title
             
             if self.stats.current_export_info and channel.title in self.stats.current_export_info:
-                status = "[зеленый]⚡ Экспорт...[/зеленый]"
-                channel_name = f"[болд зеленый]▶ {channel_name}[/болд зеленый]"
+                status = "[green]⚡ Экспорт...[/green]"
+                channel_name = f"[bold green]▶ {channel_name}[/bold green]"
             elif channel.last_check:
-                status = "[синий]✓ Завершен[/синий]"
+                status = "[blue]✓ Завершен[/blue]"
             else:
-                status = "[дим]⏳ Ожидание[/дим]"
+                status = "[dim]⏳ Ожидание[/dim]"
             
             # Форматируем дату последней проверки
             if last_check != "Никогда":
@@ -1031,7 +1031,7 @@ class TelegramExporter:
             total_pages = (len(self.channels) - 1) // self.channels_display_limit + 1
             current_page = self.channels_scroll_offset // self.channels_display_limit + 1
             channels_table.add_row(
-                f"[дим]——— Показано {end_idx - start_idx} из {len(self.channels)} каналов (стр. {current_page}/{total_pages}) ———[/дим]",
+                f"[dim]——— Показано {end_idx - start_idx} из {len(self.channels)} каналов (стр. {current_page}/{total_pages}) ———[/dim]",
                 "", "", "", "", ""
             )
         
@@ -1051,7 +1051,7 @@ class TelegramExporter:
     def configure_export_types(self):
         """Настройка типов экспорта для каналов с дополнительными возможностями"""
         if not self.channels:
-            self.console.print("[ярко-красный]Нет выбранных каналов[/ярко-красный]")
+            self.console.print("[bright_red]Нет выбранных каналов[/bright_red]")
             input("Нажмите Enter для продолжения...")
             return
         
@@ -1082,7 +1082,7 @@ class TelegramExporter:
         
         self.console.print(table)
         
-        self.console.print("\n[ярко-синий]Команды:[/ярко-синий]")
+        self.console.print("\n[bright_blue]Команды:[/bright_blue]")
         self.console.print("1 - Изменить тип экспорта конкретного канала")
         self.console.print("2 - Установить одинаковый тип для всех каналов")
         self.console.print("3 - [новое] Переэкспортировать все каналы в Markdown")
@@ -1102,7 +1102,7 @@ class TelegramExporter:
         elif choice == "q":
             return
         else:
-            self.console.print("[ярко-красный]Неверная команда[/ярко-красный]")
+            self.console.print("[bright_red]Неверная команда[/bright_red]")
             input("Нажмите Enter для продолжения...")
     
     def _configure_single_channel_export_type(self):
@@ -1114,11 +1114,11 @@ class TelegramExporter:
                 if new_type:
                     self.channels[channel_num].export_type = new_type
                     self.save_channels()
-                    self.console.print(f"[ярко-зеленый]Тип экспорта для канала '{self.channels[channel_num].title}' обновлен[/ярко-зеленый]")
+                    self.console.print(f"[bright_green]Тип экспорта для канала '{self.channels[channel_num].title}' обновлен[/bright_green]")
             else:
-                self.console.print("[ярко-красный]Неверный номер канала[/ярко-красный]")
+                self.console.print("[bright_red]Неверный номер канала[/bright_red]")
         except ValueError:
-            self.console.print("[ярко-красный]Неверный формат номера[/ярко-красный]")
+            self.console.print("[bright_red]Неверный формат номера[/bright_red]")
         
         input("Нажмите Enter для продолжения...")
     
@@ -1129,7 +1129,7 @@ class TelegramExporter:
             for channel in self.channels:
                 channel.export_type = new_type
             self.save_channels()
-            self.console.print("[ярко-зеленый]Тип экспорта обновлен для всех каналов[/ярко-зеленый]")
+            self.console.print("[bright_green]Тип экспорта обновлен для всех каналов[/bright_green]")
         
         input("Нажмите Enter для продолжения...")
     
@@ -1149,7 +1149,7 @@ class TelegramExporter:
         elif choice == "3":
             return ExportType.FILES_ONLY
         else:
-            self.console.print("[ярко-красный]Неверный выбор[/ярко-красный]")
+            self.console.print("[bright_red]Неверный выбор[/bright_red]")
             return None
     
     async def _reexport_all_channels_to_markdown(self):
@@ -1157,23 +1157,23 @@ class TelegramExporter:
         if not Confirm.ask("Переэкспортировать все каналы в Markdown с перезаписью файлов?", default=False):
             return
             
-        self.console.print("[зеленый]Запуск переэкспорта всех каналов...[/зеленый]")
+        self.console.print("[green]Запуск переэкспорта всех каналов...[/green]")
         
         success_count = 0
         error_count = 0
         
         for i, channel in enumerate(self.channels, 1):
             try:
-                self.console.print(f"[синий]Переэкспорт {i}/{len(self.channels)}: {channel.title}[/синий]")
+                self.console.print(f"[blue]Переэкспорт {i}/{len(self.channels)}: {channel.title}[/blue]")
                 await self._reexport_channel_to_markdown(channel)
                 success_count += 1
-                self.console.print(f"[зеленый]✓ Завершен: {channel.title}[/зеленый]")
+                self.console.print(f"[green]✓ Завершен: {channel.title}[/green]")
             except Exception as e:
                 error_count += 1
                 self.logger.error(f"Error reexporting {channel.title} to Markdown: {e}")
-                self.console.print(f"[красный]✗ Ошибка: {channel.title} - {e}[/красный]")
+                self.console.print(f"[red]✗ Ошибка: {channel.title} - {e}[/red]")
         
-        self.console.print(f"\n[болд зеленый]Переэкспорт завершен![/болд зеленый]")
+        self.console.print(f"\n[bold green]Переэкспорт завершен![/bold green]")
         self.console.print(f"Успешно: {success_count}, Ошибок: {error_count}")
         
         # Отправляем уведомление
@@ -1189,13 +1189,13 @@ class TelegramExporter:
             if 0 <= channel_num < len(self.channels):
                 channel = self.channels[channel_num]
                 if Confirm.ask(f"Переэкспортировать '{channel.title}' в Markdown с перезаписью файла?", default=False):
-                    self.console.print(f"[зеленый]Запуск переэкспорта: {channel.title}[/зеленый]")
+                    self.console.print(f"[green]Запуск переэкспорта: {channel.title}[/green]")
                     asyncio.create_task(self._reexport_channel_to_markdown(channel))
-                    self.console.print(f"[зеленый]✓ Переэкспорт запущен: {channel.title}[/зеленый]")
+                    self.console.print(f"[green]✓ Переэкспорт запущен: {channel.title}[/green]")
             else:
-                self.console.print("[ярко-красный]Неверный номер канала[/ярко-красный]")
+                self.console.print("[bright_red]Неверный номер канала[/bright_red]")
         except ValueError:
-            self.console.print("[ярко-красный]Неверный формат номера[/ярко-красный]")
+            self.console.print("[bright_red]Неверный формат номера[/bright_red]")
         
         input("Нажмите Enter для продолжения...")
     
