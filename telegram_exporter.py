@@ -812,9 +812,9 @@ class TelegramExporter:
             Layout(name="right", ratio=1)
         )
         
-        # Левая панель - оптимизированная таблица каналов
+        # Левая панель - оптимизированная таблица каналов с полным растягиванием
         channels_table = self._create_detailed_channels_table()
-        layout["main"]["left"].update(Panel(channels_table, title="Мониторинг каналов", box=box.ROUNDED))
+        layout["main"]["left"].update(Panel(channels_table, title="Мониторинг каналов", box=box.ROUNDED, expand=True))
         
         # Правая панель - детальная статистика
         stats_content = self._create_detailed_statistics()
@@ -929,7 +929,15 @@ class TelegramExporter:
     
     def _create_detailed_channels_table(self) -> Table:
         """Создает оптимизированную таблицу каналов для левой панели"""
-        channels_table = Table(box=box.ROUNDED, show_header=True, header_style="bold white", expand=True)
+        channels_table = Table(
+            box=box.ROUNDED, 
+            show_header=True, 
+            header_style="bold white", 
+            expand=True,
+            min_width=60,  # Минимальная ширина
+            height=None,   # Позволяем автоматическое растягивание по высоте
+            collapse_padding=True  # Уменьшаем отступы для экономии места
+        )
         channels_table.add_column("Канал", style="green", no_wrap=False, ratio=3)
         channels_table.add_column("Проверка", style="blue", no_wrap=True, ratio=2)
         channels_table.add_column("Сообщений", style="yellow", justify="right", no_wrap=True, ratio=1)
@@ -961,7 +969,7 @@ class TelegramExporter:
                     break
         
         # Определяем диапазон отображения для автоматической прокрутки
-        max_visible_channels = 15
+        max_visible_channels = 25  # Увеличиваем для лучшего использования вертикального пространства
         start_index = 0
         
         if current_channel_index >= 0:
