@@ -338,6 +338,28 @@ class HTMLExporter(BaseExporter):
             margin-bottom: 20px;
             text-align: center;
         }}
+        pre {{
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #007acc;
+            overflow-x: auto;
+            font-family: 'Courier New', Consolas, monospace;
+            font-size: 14px;
+            line-height: 1.4;
+        }}
+        code {{
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', Consolas, monospace;
+            font-size: 14px;
+        }}
+        pre code {{
+            background: none;
+            padding: 0;
+            border-radius: 0;
+        }}
     </style>
 </head>
 <body>
@@ -368,8 +390,8 @@ class HTMLExporter(BaseExporter):
             """
             
             if msg.text:
-                escaped_text = html.escape(self.clean_text(msg.text))
-                message_html += f'<div class="message-text">{escaped_text}</div>'
+                formatted_text = self._format_html_text(msg.text)
+                message_html += f'<div class="message-text">{formatted_text}</div>'
             
             if msg.media_type:
                 message_html += f"""
@@ -398,6 +420,44 @@ class HTMLExporter(BaseExporter):
             total_messages=len(messages),
             messages_html=messages_html
         )
+    
+    def _format_html_text(self, text: str) -> str:
+        """Форматирование текста для HTML с поддержкой блоков кода"""
+        if not text:
+            return ""
+        
+        # Сначала очищаем от проблемных символов
+        cleaned = self.clean_text(text)
+        
+        import re
+        
+        # Обрабатываем многострочные блоки кода (```)
+        def format_multiline_code(match):
+            code_content = match.group(1).strip()
+            escaped_code = html.escape(code_content)
+            return f'<pre><code>{escaped_code}</code></pre>'
+        
+        # Обрабатываем однострочные блоки кода (`code`)
+        def format_inline_code(match):
+            code_content = match.group(1)
+            escaped_code = html.escape(code_content)
+            return f'<code>{escaped_code}</code>'
+        
+        # Применяем форматирование блоков кода
+        formatted = re.sub(r'```([\s\S]*?)```', format_multiline_code, cleaned)
+        formatted = re.sub(r'`([^`\n]+)`', format_inline_code, formatted)
+        
+        # Экранируем остальной текст
+        formatted = html.escape(formatted)
+        
+        # Восстанавливаем уже отформатированные блоки кода
+        formatted = re.sub(r'&lt;pre&gt;&lt;code&gt;([\s\S]*?)&lt;/code&gt;&lt;/pre&gt;', r'<pre><code>\1</code></pre>', formatted)
+        formatted = re.sub(r'&lt;code&gt;([^&]*)&lt;/code&gt;', r'<code>\1</code>', formatted)
+        
+        # Преобразуем переносы строк в HTML
+        formatted = formatted.replace('\n', '<br>')
+        
+        return formatted
 
 
 class MarkdownExporter(BaseExporter):
@@ -591,19 +651,46 @@ class MarkdownExporter(BaseExporter):
     
 
     def _safe_markdown_text(self, text: str) -> str:
-        """Создание безопасного для KaTeX текста Markdown"""
+        """Создание безопасного для KaTeX текста Markdown с сохранением блоков кода"""
         if not text:
             return ""
         
         # Сначала очищаем от проблемных символов
         cleaned = self.clean_text(text)
         
+        import re
+        
+        # Находим и защищаем блоки кода (многострочные и однострочные)
+        code_blocks = []
+        code_counter = 0
+        
+        # Защищаем многострочные блоки кода (```)
+        def protect_multiline_code(match):
+            nonlocal code_counter
+            code_blocks.append(match.group(0))
+            placeholder = f"__CODE_BLOCK_{code_counter}__"
+            code_counter += 1
+            return placeholder
+        
+        # Защищаем однострочные блоки кода (`code`)
+        def protect_inline_code(match):
+            nonlocal code_counter
+            code_blocks.append(match.group(0))
+            placeholder = f"__CODE_BLOCK_{code_counter}__"
+            code_counter += 1
+            return placeholder
+        
+        # Сначала защищаем многострочные блоки кода
+        cleaned = re.sub(r'```[\s\S]*?```', protect_multiline_code, cleaned)
+        
+        # Затем защищаем однострочные блоки кода
+        cleaned = re.sub(r'`[^`\n]+`', protect_inline_code, cleaned)
+        
         # Применяем минимальное экранирование только для критичных символов
-        # Избегаем экранирования дефисов и других символов, которые вызывают проблемы с KaTeX
+        # НЕ экранируем обратные кавычки, так как они нужны для блоков кода
         safe_replacements = [
             ('*', '\\*'),      # Звездочки для выделения
             ('_', '\\_'),      # Подчеркивания для выделения
-            ('`', '\\`'),      # Обратные кавычки для кода
             ('[', '\\['),      # Квадратные скобки для ссылок
             (']', '\\]'),      # Квадратные скобки для ссылок
         ]
@@ -611,9 +698,13 @@ class MarkdownExporter(BaseExporter):
         for original, escaped in safe_replacements:
             cleaned = cleaned.replace(original, escaped)
         
-        # Экранируем решетку только в начале строки (для заголовков)
-        import re
+        # Экранируем решетку только в начале строки (для заголовков), но не в блоках кода
         cleaned = re.sub(r'^#', '\\#', cleaned, flags=re.MULTILINE)
+        
+        # Восстанавливаем защищенные блоки кода
+        for i, code_block in enumerate(code_blocks):
+            placeholder = f"__CODE_BLOCK_{i}__"
+            cleaned = cleaned.replace(placeholder, code_block)
         
         return cleaned
 
