@@ -361,7 +361,7 @@ class TelegramExporter:
             self.channels = valid_channels
             success_msg = f"Успешно загружено {len(valid_channels)} каналов"
             if len(valid_channels) != len(data):
-                success_msg += f" из {len(data)} (пропущено {len(data) - len(valid_channels)})")
+                success_msg += f" из {len(data)} (пропущено {len(data) - len(valid_channels)})"
                 
             self.console.print(f"[green]{success_msg}[/green]")
             self.logger.info(f"Loaded {len(valid_channels)} channels from {file_path}")
