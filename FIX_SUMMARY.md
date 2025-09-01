@@ -1,67 +1,96 @@
-# Fix Summary: Duplicate Telegram Notifications Issue
+# Исправления для уведомлений и проверки новых сообщений
 
-## Problem Description
-The user reported receiving three duplicate notifications in Telegram for successful exports, indicating that notifications were being sent multiple times during the export process.
+## Проблемы в текущей реализации
 
-## Root Cause Analysis
-After analyzing the code, I identified several causes for the duplicate notifications:
+### 1. Неправильная логика реэкспорта
+- В текущей реализации реэкспорт запускается при любом несоответствии количества сообщений, а не только при отсутствии MD файла
+- Реэкспорт перезаписывает файл полностью, а не дополняет его
+- Нет проверки на разницу в 2 раза между количеством сообщений в файле и в канале
 
-1. **Recursive calls during MD file verification**: The `export_channel` method was being called recursively during MD file verification, which would trigger multiple notifications.
+### 2. Неправильная логика уведомлений
+- Уведомления о реэкспорте не содержат информации о причине реэкспорта
+- Уведомления отправляются в неправильных ситуациях
+- Нет различия между уведомлениями о новых сообщениях и уведомлениями о реэкспорте
 
-2. **Recursive calls during FloodWaitError handling**: When encountering FloodWait errors, the code was making recursive calls to `export_channel` without preventing duplicate notifications.
+### 3. Неправильная проверка дисбаланса сообщений
+- Текущая реализация использует простое сравнение `actual_count >= expected_count`
+- Нет проверки на разницу в 2 раза между сообщениями в файле и в канале
 
-3. **Missing MD files export process**: The `_export_missing_md_channels` method was calling `export_channel` for multiple channels without proper notification control.
+## Необходимые изменения
 
-4. **Scheduled export of all channels**: The `export_all_channels` method was calling `export_channel` for each channel without preventing duplicate notifications.
+### 1. Изменить логику реэкспорта
+- Реэкспорт должен запускаться ТОЛЬКО при отсутствии MD файла
+- При наличии новых сообщений MD файл должен дополняться, а не перезаписываться
+- Реэкспорт по дисбалансу должен запускаться только при разнице в 2 раза
 
-## Solution Implemented
+### 2. Улучшить уведомления
+- Уведомления о реэкспорте должны содержать информацию о причине
+- Уведомления должны отправляться только в нужных случаях
+- Разделить уведомления о новых сообщениях и уведомления о реэкспорте
 
-### 1. Added Notification Control Flag
-I introduced a `_in_md_verification` flag to track when the export process is in a recursive or batch mode where notifications should be suppressed.
+### 3. Добавить проверку дисбаланса
+- Добавить проверку на разницу в 2 раза между сообщениями в файле и в канале
+- Запускать реэкспорт только при такой разнице
 
-### 2. Fixed MD Verification Recursive Calls
-Modified the MD file verification section to:
-- Set the `_in_md_verification` flag before recursive calls
-- Properly restore the flag after recursive calls
-- Prevent notifications during recursive export operations
+## План реализации
 
-### 3. Fixed FloodWaitError Handling
-Updated the FloodWaitError handling to:
-- Set the `_in_md_verification` flag before recursive calls
-- Restore the original flag value after the recursive call
-- Prevent duplicate notifications during retry attempts
+1. Изменить функцию `_verify_md_file_count` для возврата дополнительной информации о типе несоответствия
+2. Обновить логику проверки MD файла в `export_channel` 
+3. Добавить проверку на разницу в 2 раза
+4. Обновить функцию `_create_notification` для поддержки разных типов уведомлений
+5. Изменить логику инкрементального экспорта в Markdown
 
-### 4. Fixed Missing MD Files Export
-Modified the `_export_missing_md_channels` method to:
-- Set the `_in_md_verification` flag at the beginning of the process
-- Restore the original flag value at the end
-- Prevent notifications during the batch export of channels without MD files
+## Реализованные изменения
 
-### 5. Fixed Scheduled Export of All Channels
-Updated the `export_all_channels` method to:
-- Set the `_in_md_verification` flag at the beginning of the process
-- Restore the original flag value at the end
-- Prevent notifications during the batch export of all channels
+### 1. Обновлена функция `_verify_md_file_count`
+- Теперь возвращает тройку: `(совпадает ли количество, фактическое количество, тип несоответствия)`
+- Типы несоответствий: 
+  - `"missing"` - файл отсутствует
+  - `"imbalance"` - дисбаланс (>2 раза разница)
+  - `"normal"` - обычное несоответствие
+- Добавлена проверка на дисбаланс: если в файле сообщений в 2 раза меньше чем в канале
 
-## Message Counting Logic
-The message counting logic was already correct:
-- `session_filtered_count` tracks filtered messages during the current export session
-- This count is properly added to `self.stats.filtered_messages` at the end of the export
-- The calculation "useful messages = total messages - promotional messages" is implemented correctly
+### 2. Обновлена логика проверки MD файла в `export_channel`
+- Реэкспорт запускается ТОЛЬКО при отсутствии MD файла или при дисбалансе
+- При обычном несоответствии файл дополняется при следующем экспорте новых сообщений
+- Добавлены уведомления о реэкспорте с указанием причины
 
-## Files Modified
-- `telegram_exporter.py`: Applied all the fixes mentioned above
+### 3. Добавлена новая функция `_create_reexport_notification`
+- Создает специальные уведомления о реэкспорте
+- Включает информацию о причине реэкспорта
 
-## Testing
-The changes ensure that:
-1. Notifications are only sent once per actual export operation
-2. Recursive calls during error handling or verification processes don't trigger duplicate notifications
-3. Batch operations (export all channels, export missing MD files) don't send multiple notifications
-4. Message counting logic remains accurate
+### 4. Обновлена логика экспорта Markdown файлов
+- Уточнена логика append_mode для Markdown экспортера
+- Обеспечено правильное инкрементальное добавление сообщений
 
-## Verification
-To verify the fix:
-1. Run the exporter and monitor for duplicate notifications
-2. Check that a single successful export triggers only one notification
-3. Verify that message counting logic still works correctly
-4. Confirm that error handling and verification processes don't send duplicate notifications
+### 5. Обновлена логика проверки отсутствующих MD файлов
+- Метод `_export_missing_md_channels` теперь отправляет уведомления о реэкспорте
+- Причина уведомления: "отсутствует MD файл"
+
+## Проверка соответствия требованиям
+
+✅ **Делать полный реэкспорт нужно только в том случае когда отсутствует md файл**:
+- Реализовано через проверку типа несоответствия "missing"
+
+✅ **Если в канале появилось новое сообщение, необходимо дополнить файл экспорта md а не переписывать**:
+- Реализовано через использование append_mode при инкрементальном экспорте
+
+✅ **Реэкспорт необходимо делать когда количество сообщений в файле md и количество сообщений в канале отличается минимум в 2 раза**:
+- Реализовано через проверку дисбаланса и тип несоответствия "imbalance"
+
+✅ **Уведомления о новых сообщениях в телеграм должно уведомлять об реэкспорте, если он был и о причине реэкспорта. В любом другом случае необходимо сообщать только о новых сообщениях с момента последней проверки**:
+- Реализовано через две отдельные функции уведомлений:
+  - `_create_notification` для новых сообщений
+  - `_create_reexport_notification` для реэкспорта с причиной
+
+## Файлы, в которые были внесены изменения
+
+1. `telegram_exporter.py`:
+   - Обновлена функция `_verify_md_file_count`
+   - Обновлена логика проверки MD файла в `export_channel`
+   - Добавлена функция `_create_reexport_notification`
+   - Обновлена логика экспорта Markdown файлов
+   - Обновлена логика проверки отсутствующих MD файлов
+
+2. `FIX_SUMMARY.md`:
+   - Документированы все изменения
