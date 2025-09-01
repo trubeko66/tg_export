@@ -1080,14 +1080,15 @@ class TelegramExporter:
             self.stats.discovered_messages = 0
             self.stats.exported_messages = 0
     
-    def _verify_md_file_count(self, channel: ChannelInfo) -> tuple[bool, int]:
+    def _verify_md_file_count(self, channel: ChannelInfo) -> tuple[bool, int, str]:
         """Проверяет количество сообщений в MD файле канала
         
         Args:
             channel: Информация о канале для проверки
             
         Returns:
-            tuple[bool, int]: (Совпадает ли количество, фактическое количество сообщений в MD файле)
+            tuple[bool, int, str]: (Совпадает ли количество, фактическое количество сообщений в MD файле, тип несоответствия)
+            Тип несоответствия: "missing" - файл отсутствует, "imbalance" - дисбаланс (>2 раза), "normal" - нормальное несоответствие
         """
         try:
             # Получаем путь к MD файлу
@@ -1105,7 +1106,7 @@ class TelegramExporter:
             # Проверяем существование MD файла
             if not md_file.exists():
                 self.logger.warning(f"MD файл не найден для канала {channel.title}")
-                return False, 0
+                return False, 0, "missing"
             
             # Читаем MD файл и подсчитываем количество сообщений
             try:
@@ -1120,6 +1121,13 @@ class TelegramExporter:
                 
                 # Сравниваем с ожидаемым количеством
                 expected_count = channel.total_messages
+                
+                # Проверяем дисбаланс - если в файле сообщений в 2 раза меньше чем в канале
+                if expected_count > 0 and actual_count > 0 and expected_count / actual_count >= 2:
+                    self.logger.warning(f"MD файл для {channel.title}: найдено {actual_count} сообщений, ожидалось {expected_count} - ДИСБАЛАНС")
+                    return False, actual_count, "imbalance"
+                
+                # Нормальное несоответствие - файл есть, но количество сообщений не совпадает
                 matches = (actual_count >= expected_count)  # Используем >= чтобы учесть возможные обновления
                 
                 if matches:
@@ -1127,15 +1135,15 @@ class TelegramExporter:
                 else:
                     self.logger.warning(f"MD файл для {channel.title}: найдено {actual_count} сообщений, ожидалось {expected_count} - НЕСООТВЕТСТВИЕ")
                 
-                return matches, actual_count
+                return matches, actual_count, "normal"
                 
             except Exception as e:
                 self.logger.error(f"Ошибка чтения MD файла для {channel.title}: {e}")
-                return False, 0
+                return False, 0, "normal"
                 
         except Exception as e:
             self.logger.error(f"Ошибка проверки MD файла для {channel.title}: {e}")
-            return False, 0
+            return False, 0, "normal"
 
     async def _post_loading_menu(self):
         """Меню дополнительных действий после загрузки каналов"""
@@ -2284,7 +2292,11 @@ class TelegramExporter:
                 
                 json_file = json_exporter.export_messages(messages_data, append_mode=append_mode)
                 html_file = html_exporter.export_messages(messages_data, append_mode=append_mode)
-                md_file = md_exporter.export_messages(messages_data, append_mode=append_mode)
+                
+                # Для Markdown файла используем append_mode всегда когда файл существует
+                # Это обеспечивает инкрементальное добавление сообщений
+                md_append_mode = append_mode or (md_file_path.exists() and not (hasattr(channel, '_force_full_reexport') and channel._force_full_reexport))
+                md_file = md_exporter.export_messages(messages_data, append_mode=md_append_mode)
                 
                 # Проверка создания файлов экспорта
                 export_files_created = []
@@ -2345,12 +2357,19 @@ class TelegramExporter:
                         self.stats.md_verification_progress = "Проверка количества сообщений в MD файле"
                         
                         # Используем нашу функцию проверки
-                        md_matches, actual_md_count = self._verify_md_file_count(channel)
+                        md_matches, actual_md_count, discrepancy_type = self._verify_md_file_count(channel)
                         
-                        if not md_matches:
-                            self.logger.warning(f"MD файл для {channel.title} содержит {actual_md_count} сообщений, ожидалось {channel.total_messages}. Запуск повторного экспорта")
+                        # Реэкспорт нужен только в двух случаях:
+                        # 1. Отсутствует MD файл
+                        # 2. Есть дисбаланс (>2 раза разница)
+                        if not md_matches and (discrepancy_type == "missing" or discrepancy_type == "imbalance"):
+                            reason = "отсутствует MD файл" if discrepancy_type == "missing" else "дисбаланс сообщений (>2 раза)"
+                            self.logger.warning(f"MD файл для {channel.title} требует реэкспорта: {reason}")
                             self.stats.md_reexport_count += 1
-                            self.stats.md_verification_progress = f"Несоответствие: {actual_md_count}/{channel.total_messages}, ре-экспорт #{self.stats.md_reexport_count}"
+                            self.stats.md_verification_progress = f"Требуется ре-экспорт: {reason}, попытка #{self.stats.md_reexport_count}"
+                            
+                            # Сохраняем причину для уведомления
+                            reexport_reason = reason
                             
                             # Проверяем максимальное количество попыток ре-экспорта
                             max_reexport_attempts = 3
@@ -2381,6 +2400,10 @@ class TelegramExporter:
                                     try:
                                         await self.export_channel(channel)
                                         self.logger.info(f"Успешно выполнен повторный экспорт для {channel.title}")
+                                        
+                                        # Отправляем уведомление о реэкспорте с причиной
+                                        notification = self._create_reexport_notification(channel, reexport_reason)
+                                        await self.send_notification(notification)
                                     except Exception as e:
                                         self.logger.error(f"Ошибка повторного экспорта для {channel.title}: {e}")
                                     finally:
@@ -2400,15 +2423,19 @@ class TelegramExporter:
                                 # Сбрасываем флаг MD верификации
                                 self._in_md_verification = False
                         else:
-                            # MD файл совпадает, сбрасываем флаг
+                            # MD файл совпадает или обычное несоответствие (дополняем, не перезаписываем)
                             self._in_md_verification = False
+                            
+                            # Если есть обычное несоответствие, но не дисбаланс и файл есть, 
+                            # то при следующем экспорте новые сообщения будут добавлены
+                            if not md_matches and discrepancy_type == "normal":
+                                self.logger.info(f"MD файл для {channel.title} будет дополнен при следующем экспорте новых сообщений")
                     else:
                         # Нет MD файла, сбрасываем флаг
                         self._in_md_verification = False
                 else:
                     # Мы в рекурсивном вызове, сбрасываем флаг
                     self._in_md_verification = False
-                
             else:
                 self.logger.info(f"No new messages found in {channel.title}")
                 channel.last_check = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2750,7 +2777,7 @@ class TelegramExporter:
             return False
     
     def _create_notification(self, channel: ChannelInfo, messages_count: int, success: bool, error: str = None) -> str:
-        """Создание текста уведомления"""
+        """Создание текста уведомления о новых сообщениях"""
         if success and messages_count > 0:
             return f"""
 📢 <b>Новые сообщения в канале</b>
@@ -2780,6 +2807,19 @@ class TelegramExporter:
 ❌ <b>Статус:</b> Ошибка
 🔍 <b>Причина:</b> {error or 'Неизвестная ошибка'}
             """.strip()
+    
+    def _create_reexport_notification(self, channel: ChannelInfo, reason: str) -> str:
+        """Создание текста уведомления о реэкспорте"""
+        return f"""
+🔄 <b>Выполнен реэкспорт канала</b>
+
+🔗 <b>Канал:</b> {channel.title}
+❓ <b>Причина:</b> {reason}
+📅 <b>Время:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+✅ <b>Статус:</b> Реэкспорт завершен
+
+📁 Файлы сохранены в папку: {channel.title}
+        """.strip()
     
     async def main_loop(self):
         """Упрощенный основной цикл программы без управления клавишами"""
@@ -2890,6 +2930,10 @@ class TelegramExporter:
                     try:
                         await self.export_channel(channel)
                         self.logger.info(f"Успешно экспортирован канал: {channel.title}")
+                        
+                        # Отправляем уведомление о реэкспорте из-за отсутствия MD файла
+                        notification = self._create_reexport_notification(channel, "отсутствует MD файл")
+                        await self.send_notification(notification)
                     except Exception as e:
                         self.logger.error(f"Ошибка экспорта канала {channel.title}: {e}")
                         # Восстанавливаем оригинальное значение при ошибке
