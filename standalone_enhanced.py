@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Улучшенная версия Telegram Channel Exporter с новыми возможностями
+Автономная улучшенная версия Telegram Channel Exporter
 """
 
 import asyncio
@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from typing import List, Any, Optional, Tuple
 from datetime import datetime
+from dataclasses import dataclass
 
 from rich.console import Console
 from rich.panel import Panel
@@ -19,40 +20,62 @@ from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import box
 
-# Импортируем основные модули
-from telegram_exporter import TelegramExporter, ChannelInfo
-from config_manager import ConfigManager
-from analytics import AnalyticsReporter
-from channel_dashboard import ChannelDashboard
-from html_reporter import HTMLReporter
-from simple_cli import SimpleCLI
+
+@dataclass
+class MockChannel:
+    """Мок-канал для демонстрации"""
+    title: str
+    total_messages: int = 0
+    last_check: Optional[str] = None
+    export_errors: int = 0
 
 
-class EnhancedTelegramExporter(TelegramExporter):
-    """Улучшенная версия TelegramExporter с новыми возможностями"""
+@dataclass
+class MockStats:
+    """Мок-статистика для демонстрации"""
+    total_messages: int = 0
+    export_errors: int = 0
+    filtered_messages: int = 0
+    last_export_time: Optional[str] = None
+
+
+class StandaloneEnhancedExporter:
+    """Автономная улучшенная версия экспортера"""
     
     def __init__(self):
-        super().__init__()
-        self.analytics_reporter = AnalyticsReporter(self.console)
-        self.dashboard = ChannelDashboard(self.console)
-        self.html_reporter = HTMLReporter()
-        self.simple_cli = SimpleCLI(self.console)
+        self.console = Console()
+        self.channels: List[MockChannel] = []
+        self.stats = MockStats()
+        self._load_demo_data()
+    
+    def _load_demo_data(self):
+        """Загрузить демонстрационные данные"""
+        # Создаем демонстрационные каналы
+        demo_channels = [
+            MockChannel("IT News", 5000, datetime.now().isoformat()),
+            MockChannel("Tech Updates", 3000, datetime.now().isoformat()),
+            MockChannel("Programming", 2000, datetime.now().isoformat()),
+            MockChannel("AI Research", 1500, datetime.now().isoformat()),
+            MockChannel("Dev Tools", 1000, datetime.now().isoformat()),
+            MockChannel("Web Development", 800, datetime.now().isoformat()),
+            MockChannel("Mobile Apps", 600, datetime.now().isoformat()),
+            MockChannel("Data Science", 400, datetime.now().isoformat()),
+        ]
+        
+        self.channels = demo_channels
+        
+        # Обновляем статистику
+        self.stats.total_messages = sum(ch.total_messages for ch in self.channels)
+        self.stats.export_errors = 2
+        self.stats.filtered_messages = 567
+        self.stats.last_export_time = datetime.now().strftime("%Y-%m-%d %H:%M")
     
     async def initialize(self):
-        """Инициализация улучшенного экспортера"""
+        """Инициализация"""
         try:
-            # Инициализируем базовый экспортер
-            await self.initialize_client()
-            
-            # Дополнительная инициализация для улучшенной версии
-            self.console.print("[green]Инициализация улучшенных модулей...[/green]")
-            
-            # Загружаем каналы если они есть
-            if not self.channels:
-                self.console.print("[yellow]Каналы не загружены. Используйте обычную версию для настройки.[/yellow]")
-            
+            self.console.print("[green]Инициализация автономной версии...[/green]")
+            time.sleep(1)
             self.console.print("[green]✅ Инициализация завершена[/green]")
-            
         except Exception as e:
             self.console.print(f"[red]Ошибка инициализации: {e}[/red]")
             raise
@@ -76,13 +99,13 @@ class EnhancedTelegramExporter(TelegramExporter):
             
             # Показываем меню
             menu_panel = Panel(
-                "🚀 Улучшенный Telegram Channel Exporter\n\n"
+                "🚀 Автономная улучшенная версия\n\n"
                 "1. 📊 Аналитика и отчеты\n"
                 "2. 🗺️ Интерактивная карта каналов\n"
                 "3. 🔄 Экспорт каналов\n"
                 "4. ⚙️ Настройки\n"
                 "5. 📋 Логи\n"
-                "6. 🎯 Улучшенный CLI интерфейс\n"
+                "6. 🎯 Простой CLI интерфейс\n"
                 "0. 🚪 Выход",
                 title="📋 Главное меню",
                 border_style="green"
@@ -113,7 +136,7 @@ class EnhancedTelegramExporter(TelegramExporter):
                 elif choice == "5":
                     await self.show_logs_menu()
                 elif choice == "6":
-                    await self.show_enhanced_cli()
+                    await self.show_simple_cli()
                     
             except KeyboardInterrupt:
                 if Confirm.ask("\nПрервать операцию?"):
@@ -174,17 +197,41 @@ class EnhancedTelegramExporter(TelegramExporter):
         with self.console.status("Анализ данных..."):
             time.sleep(1)
         
-        # Получаем данные для аналитики
-        channels_data = self._get_channels_data()
+        # Создаем панель с общей статистикой
+        stats_panel = Panel(
+            f"📊 Общая статистика\n\n"
+            f"• Всего каналов: {len(self.channels)}\n"
+            f"• Активных каналов: {len([ch for ch in self.channels if ch.last_check])}\n"
+            f"• Всего сообщений: {self.stats.total_messages:,}\n"
+            f"• Медиафайлов: 2,345\n"
+            f"• Общий размер: 1.2 ГБ\n"
+            f"• Последний экспорт: {self.stats.last_export_time}",
+            title="📈 Статистика",
+            border_style="green"
+        )
         
-        if not channels_data:
-            self.console.print("[yellow]Нет данных для анализа[/yellow]")
-            input("Нажмите Enter для продолжения...")
-            return
+        # Создаем таблицу топ-каналов
+        top_table = Table(title="Топ-5 каналов по активности", box=box.ROUNDED)
+        top_table.add_column("Канал", style="cyan")
+        top_table.add_column("Сообщений", style="green", justify="right")
+        top_table.add_column("Медиа", style="yellow", justify="right")
+        top_table.add_column("Размер (МБ)", style="blue", justify="right")
         
-        # Генерируем отчет
-        report = self.analytics_reporter.generate_export_report(self.channels, self.stats)
-        self.console.print(report)
+        # Сортируем каналы по количеству сообщений
+        sorted_channels = sorted(self.channels, key=lambda x: x.total_messages, reverse=True)
+        
+        for i, channel in enumerate(sorted_channels[:5]):
+            media_count = channel.total_messages // 10  # Примерное количество медиа
+            size_mb = channel.total_messages * 0.1  # Примерный размер
+            top_table.add_row(
+                channel.title,
+                f"{channel.total_messages:,}",
+                f"{media_count:,}",
+                f"{size_mb:.1f}"
+            )
+        
+        self.console.print(stats_panel)
+        self.console.print(top_table)
         
         input("\nНажмите Enter для продолжения...")
     
@@ -204,7 +251,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         table.add_column("Сообщений", style="yellow", justify="right")
         
         for i, channel in enumerate(self.channels, 1):
-            table.add_row(str(i), channel.title, f"{getattr(channel, 'total_messages', 0):,}")
+            table.add_row(str(i), channel.title, f"{channel.total_messages:,}")
         
         self.console.print(table)
         
@@ -219,16 +266,29 @@ class EnhancedTelegramExporter(TelegramExporter):
             with self.console.status(f"Анализ канала '{selected_channel.title}'..."):
                 time.sleep(2)
             
-            # Генерируем отчет по каналу
-            export_base_dir = Path(self.config.storage.export_base_dir)
-            channel_dir = export_base_dir / self._sanitize_filename(selected_channel.title)
+            # Создаем детальный отчет
+            analysis_panel = Panel(
+                f"📊 Анализ канала: {selected_channel.title}\n\n"
+                f"• Всего сообщений: {selected_channel.total_messages:,}\n"
+                f"• Медиафайлов: {selected_channel.total_messages // 10:,}\n"
+                f"• Размер медиа: {selected_channel.total_messages * 0.1:.1f} МБ\n"
+                f"• Сообщений в день: {selected_channel.total_messages / 30:.1f}\n"
+                f"• Пиковые часы: 10:00, 14:00, 18:00\n"
+                f"• Уровень вовлеченности: 8.7/10\n"
+                f"• Темп роста: +12.3%\n"
+                f"• Последняя активность: {selected_channel.last_check or 'Неизвестно'}\n\n"
+                f"Топ-ключевые слова:\n"
+                f"• программирование (234)\n"
+                f"• разработка (189)\n"
+                f"• технологии (156)\n"
+                f"• код (123)\n"
+                f"• алгоритм (98)",
+                title=f"📈 Анализ: {selected_channel.title}",
+                border_style="blue"
+            )
             
-            if channel_dir.exists():
-                report = self.analytics_reporter.generate_channel_report(channel_dir, selected_channel.title)
-                self.console.print(report)
-            else:
-                self.console.print(f"[yellow]Нет данных для канала '{selected_channel.title}'[/yellow]")
-                
+            self.console.print(analysis_panel)
+            
         except (ValueError, IndexError):
             self.console.print("[red]Неверный выбор канала[/red]")
         
@@ -241,17 +301,34 @@ class EnhancedTelegramExporter(TelegramExporter):
         with self.console.status("Подготовка сравнения..."):
             time.sleep(1)
         
-        # Получаем данные для сравнения
-        channels_data = self._get_channels_data()
+        # Создаем сравнительную таблицу
+        comparison_table = Table(title="Сравнение каналов", box=box.ROUNDED)
+        comparison_table.add_column("Канал", style="cyan")
+        comparison_table.add_column("Сообщений", style="green", justify="right")
+        comparison_table.add_column("Медиа", style="yellow", justify="right")
+        comparison_table.add_column("Размер (МБ)", style="blue", justify="right")
+        comparison_table.add_column("Активность/день", style="magenta", justify="right")
+        comparison_table.add_column("Вовлеченность", style="red", justify="right")
         
-        if len(channels_data) < 2:
-            self.console.print("[yellow]Недостаточно данных для сравнения (нужно минимум 2 канала)[/yellow]")
-            input("Нажмите Enter для продолжения...")
-            return
+        # Сортируем каналы по количеству сообщений
+        sorted_channels = sorted(self.channels, key=lambda x: x.total_messages, reverse=True)
         
-        # Генерируем сравнительный отчет
-        report = self.analytics_reporter.generate_comparison_report(channels_data)
-        self.console.print(report)
+        for channel in sorted_channels:
+            media_count = channel.total_messages // 10
+            size_mb = channel.total_messages * 0.1
+            activity_per_day = channel.total_messages / 30
+            engagement = min(10, channel.total_messages / 500)
+            
+            comparison_table.add_row(
+                channel.title,
+                f"{channel.total_messages:,}",
+                f"{media_count:,}",
+                f"{size_mb:.1f}",
+                f"{activity_per_day:.1f}",
+                f"{engagement:.1f}"
+            )
+        
+        self.console.print(comparison_table)
         
         input("\nНажмите Enter для продолжения...")
     
@@ -262,18 +339,34 @@ class EnhancedTelegramExporter(TelegramExporter):
         with self.console.status("Генерация JSON отчета..."):
             time.sleep(2)
         
-        # Получаем данные для экспорта
-        channels_data = self._get_channels_data()
+        # Создаем JSON отчет
+        report_data = {
+            "export_timestamp": datetime.now().isoformat(),
+            "channels": [
+                {
+                    "name": ch.title,
+                    "total_messages": ch.total_messages,
+                    "media_files": ch.total_messages // 10,
+                    "size_mb": ch.total_messages * 0.1,
+                    "last_check": ch.last_check,
+                    "export_errors": ch.export_errors
+                }
+                for ch in self.channels
+            ],
+            "statistics": {
+                "total_channels": len(self.channels),
+                "total_messages": self.stats.total_messages,
+                "export_errors": self.stats.export_errors,
+                "filtered_messages": self.stats.filtered_messages
+            }
+        }
         
-        if not channels_data:
-            self.console.print("[yellow]Нет данных для экспорта[/yellow]")
-            input("Нажмите Enter для продолжения...")
-            return
-        
-        # Экспортируем в JSON
+        # Сохраняем в файл
         output_file = Path("analytics_report.json")
-        self.analytics_reporter.export_analytics_to_json(channels_data, output_file)
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(report_data, f, ensure_ascii=False, indent=2)
         
+        self.console.print(f"[green]✅ JSON отчет создан: {output_file}[/green]")
         input("\nНажмите Enter для продолжения...")
     
     async def export_csv_report(self):
@@ -283,18 +376,14 @@ class EnhancedTelegramExporter(TelegramExporter):
         with self.console.status("Генерация CSV отчета..."):
             time.sleep(2)
         
-        # Получаем данные для экспорта
-        channels_data = self._get_channels_data()
-        
-        if not channels_data:
-            self.console.print("[yellow]Нет данных для экспорта[/yellow]")
-            input("Нажмите Enter для продолжения...")
-            return
-        
-        # Экспортируем в CSV
+        # Создаем CSV отчет
         output_file = Path("analytics_report.csv")
-        self.analytics_reporter.export_analytics_to_csv(channels_data, output_file)
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write("Channel,Total Messages,Media Files,Size MB,Last Check,Export Errors\n")
+            for ch in self.channels:
+                f.write(f"{ch.title},{ch.total_messages},{ch.total_messages // 10},{ch.total_messages * 0.1:.1f},{ch.last_check or 'Unknown'},{ch.export_errors}\n")
         
+        self.console.print(f"[green]✅ CSV отчет создан: {output_file}[/green]")
         input("\nНажмите Enter для продолжения...")
     
     async def export_html_report(self):
@@ -304,18 +393,89 @@ class EnhancedTelegramExporter(TelegramExporter):
         with self.console.status("Генерация HTML отчета..."):
             time.sleep(3)
         
-        # Получаем данные для экспорта
-        channels_data = self._get_channels_data()
+        # Создаем простой HTML отчет
+        html_content = f"""
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Аналитика Telegram каналов</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+        .header {{ background: #f0f0f0; padding: 20px; border-radius: 10px; }}
+        .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0; }}
+        .stat-card {{ background: #e3f2fd; padding: 15px; border-radius: 8px; text-align: center; }}
+        table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+        th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
+        th {{ background-color: #4CAF50; color: white; }}
+        tr:nth-child(even) {{ background-color: #f2f2f2; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 Аналитика Telegram каналов</h1>
+        <p>Отчет сгенерирован {datetime.now().strftime('%d.%m.%Y в %H:%M')}</p>
+    </div>
+    
+    <div class="stats">
+        <div class="stat-card">
+            <h3>{len(self.channels)}</h3>
+            <p>Всего каналов</p>
+        </div>
+        <div class="stat-card">
+            <h3>{self.stats.total_messages:,}</h3>
+            <p>Всего сообщений</p>
+        </div>
+        <div class="stat-card">
+            <h3>{sum(ch.total_messages // 10 for ch in self.channels):,}</h3>
+            <p>Медиафайлов</p>
+        </div>
+        <div class="stat-card">
+            <h3>{sum(ch.total_messages * 0.1 for ch in self.channels):.1f} МБ</h3>
+            <p>Общий размер</p>
+        </div>
+    </div>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Канал</th>
+                <th>Сообщений</th>
+                <th>Медиа</th>
+                <th>Размер (МБ)</th>
+                <th>Последняя проверка</th>
+                <th>Ошибки</th>
+            </tr>
+        </thead>
+        <tbody>
+"""
         
-        if not channels_data:
-            self.console.print("[yellow]Нет данных для экспорта[/yellow]")
-            input("Нажмите Enter для продолжения...")
-            return
+        for ch in sorted(self.channels, key=lambda x: x.total_messages, reverse=True):
+            html_content += f"""
+            <tr>
+                <td>{ch.title}</td>
+                <td>{ch.total_messages:,}</td>
+                <td>{ch.total_messages // 10:,}</td>
+                <td>{ch.total_messages * 0.1:.1f}</td>
+                <td>{ch.last_check or 'Неизвестно'}</td>
+                <td>{ch.export_errors}</td>
+            </tr>
+"""
         
-        # Экспортируем в HTML
+        html_content += """
+        </tbody>
+    </table>
+</body>
+</html>
+"""
+        
+        # Сохраняем в файл
         output_file = Path("analytics_report.html")
-        self.html_reporter.generate_html_report(channels_data, output_file)
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(html_content)
         
+        self.console.print(f"[green]✅ HTML отчет создан: {output_file}[/green]")
         input("\nНажмите Enter для продолжения...")
     
     async def show_dashboard(self):
@@ -325,12 +485,40 @@ class EnhancedTelegramExporter(TelegramExporter):
         with self.console.status("Загрузка карты каналов..."):
             time.sleep(1)
         
-        # Обновляем статус каналов
-        export_base_dir = Path(self.config.storage.export_base_dir)
-        self.dashboard.update_channels_status(self.channels, self.stats, export_base_dir)
+        # Создаем таблицу каналов
+        channels_table = Table(title="🗺️ Карта каналов", box=box.ROUNDED)
+        channels_table.add_column("Канал", style="cyan")
+        channels_table.add_column("Статус", style="green", justify="center")
+        channels_table.add_column("Сообщений", style="yellow", justify="right")
+        channels_table.add_column("Размер (МБ)", style="blue", justify="right")
+        channels_table.add_column("Последняя проверка", style="dim")
         
-        # Показываем статический дашборд
-        self.dashboard.show_static_dashboard(self.channels, self.stats, export_base_dir)
+        for channel in sorted(self.channels, key=lambda x: x.total_messages, reverse=True):
+            status = "🟢 Активен" if channel.last_check else "🔴 Неактивен"
+            size_mb = channel.total_messages * 0.1
+            last_check = channel.last_check[:10] if channel.last_check else "Никогда"
+            
+            channels_table.add_row(
+                channel.title,
+                status,
+                f"{channel.total_messages:,}",
+                f"{size_mb:.1f}",
+                last_check
+            )
+        
+        # Создаем панель статистики
+        stats_panel = Panel(
+            f"📊 Статистика карты\n\n"
+            f"• Всего каналов: {len(self.channels)}\n"
+            f"• Активных: {len([ch for ch in self.channels if ch.last_check])}\n"
+            f"• Неактивных: {len([ch for ch in self.channels if not ch.last_check])}\n"
+            f"• С ошибками: {len([ch for ch in self.channels if ch.export_errors > 0])}",
+            title="📈 Статистика",
+            border_style="blue"
+        )
+        
+        self.console.print(channels_table)
+        self.console.print(stats_panel)
         
         input("\nНажмите Enter для продолжения...")
     
@@ -383,10 +571,17 @@ class EnhancedTelegramExporter(TelegramExporter):
         if Confirm.ask(f"Экспортировать все {len(self.channels)} каналов?"):
             self.console.print("[green]Запуск экспорта всех каналов...[/green]")
             
-            # Запускаем экспорт всех каналов
-            for channel in self.channels:
-                self.console.print(f"Экспорт канала: {channel.title}")
-                await self.export_channel(channel)
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=self.console
+            ) as progress:
+                task = progress.add_task("Экспорт каналов...", total=len(self.channels))
+                
+                for i, channel in enumerate(self.channels):
+                    progress.update(task, description=f"Экспорт: {channel.title}")
+                    time.sleep(1)  # Симуляция экспорта
+                    progress.advance(task)
             
             self.console.print("[green]✅ Экспорт завершен[/green]")
         
@@ -403,7 +598,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         table.add_column("Статус", style="yellow")
         
         for i, channel in enumerate(self.channels, 1):
-            status = "Активен" if hasattr(channel, 'last_check') and channel.last_check else "Не проверен"
+            status = "Активен" if channel.last_check else "Не проверен"
             table.add_row(str(i), channel.title, status)
         
         self.console.print(table)
@@ -431,10 +626,17 @@ class EnhancedTelegramExporter(TelegramExporter):
         if Confirm.ask(f"Экспортировать {len(selected_channels)} каналов?"):
             self.console.print("[green]Запуск экспорта выбранных каналов...[/green]")
             
-            # Запускаем экспорт выбранных каналов
-            for channel in selected_channels:
-                self.console.print(f"Экспорт канала: {channel.title}")
-                await self.export_channel(channel)
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=self.console
+            ) as progress:
+                task = progress.add_task("Экспорт каналов...", total=len(selected_channels))
+                
+                for i, channel in enumerate(selected_channels):
+                    progress.update(task, description=f"Экспорт: {channel.title}")
+                    time.sleep(1)  # Симуляция экспорта
+                    progress.advance(task)
             
             self.console.print("[green]✅ Экспорт завершен[/green]")
         
@@ -445,11 +647,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         self.console.clear()
         
         # Находим проблемные каналы
-        problematic_channels = []
-        for channel in self.channels:
-            if (hasattr(channel, 'export_errors') and channel.export_errors > 0) or \
-               (hasattr(channel, 'last_check') and not channel.last_check):
-                problematic_channels.append(channel)
+        problematic_channels = [ch for ch in self.channels if ch.export_errors > 0 or not ch.last_check]
         
         if not problematic_channels:
             self.console.print("[green]Проблемных каналов не найдено[/green]")
@@ -461,10 +659,17 @@ class EnhancedTelegramExporter(TelegramExporter):
         if Confirm.ask("Повторить экспорт проблемных каналов?"):
             self.console.print("[green]Запуск повторного экспорта...[/green]")
             
-            # Запускаем повторный экспорт проблемных каналов
-            for channel in problematic_channels:
-                self.console.print(f"Повторный экспорт канала: {channel.title}")
-                await self.export_channel(channel)
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=self.console
+            ) as progress:
+                task = progress.add_task("Повторный экспорт...", total=len(problematic_channels))
+                
+                for i, channel in enumerate(problematic_channels):
+                    progress.update(task, description=f"Повторный экспорт: {channel.title}")
+                    time.sleep(1)  # Симуляция экспорта
+                    progress.advance(task)
             
             self.console.print("[green]✅ Повторный экспорт завершен[/green]")
         
@@ -506,18 +711,15 @@ class EnhancedTelegramExporter(TelegramExporter):
         """Показать меню логов"""
         self.console.clear()
         
-        # Читаем последние записи лога
-        log_file = Path("export.log")
-        if log_file.exists():
-            with open(log_file, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            # Показываем последние 20 строк
-            recent_lines = lines[-20:] if len(lines) > 20 else lines
-            
-            logs_text = "".join(recent_lines)
-        else:
-            logs_text = "Файл логов не найден"
+        # Создаем демонстрационные логи
+        demo_logs = [
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [INFO] Запуск автономной версии",
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [INFO] Загружено {len(self.channels)} каналов",
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [INFO] Инициализация завершена",
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [INFO] Готов к работе",
+        ]
+        
+        logs_text = "\n".join(demo_logs)
         
         logs_panel = Panel(
             logs_text,
@@ -529,34 +731,16 @@ class EnhancedTelegramExporter(TelegramExporter):
         
         input("\nНажмите Enter для продолжения...")
     
-    async def show_enhanced_cli(self):
-        """Показать улучшенный CLI"""
+    async def show_simple_cli(self):
+        """Показать простой CLI"""
         self.console.clear()
         
         self.console.print("[green]Запуск простого CLI интерфейса...[/green]")
         
-        # Запускаем простой CLI
-        await self.simple_cli.run(self.channels, self.stats)
-    
-    def _get_channels_data(self) -> List[Tuple[Path, str]]:
-        """Получить данные каналов для аналитики"""
-        channels_data = []
-        export_base_dir = Path(self.config.storage.export_base_dir)
-        
-        for channel in self.channels:
-            channel_dir = export_base_dir / self._sanitize_filename(channel.title)
-            if channel_dir.exists():
-                channels_data.append((channel_dir, channel.title))
-        
-        return channels_data
-    
-    def _sanitize_filename(self, filename: str) -> str:
-        """Очистка имени файла"""
-        import re
-        sanitized = re.sub(r'[<>:"/\\|?*]', '_', filename)
-        if len(sanitized) > 100:
-            sanitized = sanitized[:100] + "..."
-        return sanitized
+        # Импортируем и запускаем простой CLI
+        from simple_cli import SimpleCLI
+        simple_cli = SimpleCLI(self.console)
+        await simple_cli.run(self.channels, self.stats)
 
 
 async def main():
@@ -564,19 +748,19 @@ async def main():
     console = Console()
     
     try:
-        # Создаем улучшенный экспортер
-        exporter = EnhancedTelegramExporter()
+        # Создаем автономный экспортер
+        exporter = StandaloneEnhancedExporter()
         
         # Показываем приветствие
         welcome_panel = Panel(
-            "🚀 Добро пожаловать в улучшенную версию Telegram Channel Exporter!\n\n"
-            "Новые возможности:\n"
+            "🚀 Добро пожаловать в автономную улучшенную версию!\n\n"
+            "Эта версия работает с демонстрационными данными и включает:\n"
             "• 📊 Детальная аналитика и отчеты\n"
             "• 🗺️ Интерактивная карта каналов\n"
             "• 🎯 Улучшенный интерфейс\n"
             "• 📈 Экспорт аналитики в JSON/CSV/HTML\n\n"
             "Загрузка...",
-            title="🎉 Улучшенная версия",
+            title="🎉 Автономная версия",
             border_style="green"
         )
         
