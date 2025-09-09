@@ -1595,8 +1595,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         menu_panel = Panel(
             "🔄 Постоянный экспорт каналов\n\n"
             "1. 🚀 Запустить постоянный экспорт\n"
-            "2. 🧪 Тест уведомлений в Telegram\n"
-            "3. 📊 Показать статистику каналов\n"
+            "2. 📊 Показать статистику каналов\n"
             "0. 🔙 Назад",
             title="🔄 Меню постоянного экспорта",
             border_style="green"
@@ -1607,7 +1606,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         
         choice = Prompt.ask(
             "Выберите действие",
-            choices=["1", "2", "3", "0"]
+            choices=["1", "2", "0"]
         )
         
         if choice == "0":
@@ -1617,8 +1616,6 @@ class EnhancedTelegramExporter(TelegramExporter):
             if choice == "1":
                 await self.start_continuous_export()
             elif choice == "2":
-                await self.test_telegram_notifications()
-            elif choice == "3":
                 await self.show_channels_statistics()
                 
         except Exception as e:
@@ -1638,29 +1635,6 @@ class EnhancedTelegramExporter(TelegramExporter):
             except Exception as e:
                 self.console.print(f"[red]❌ Ошибка постоянного экспорта: {e}[/red]")
                 input("Нажмите Enter для продолжения...")
-    
-    async def test_telegram_notifications(self):
-        """Тест уведомлений в Telegram"""
-        self.console.clear()
-        
-        if not self.telegram_notifier.is_configured():
-            self.console.print("[yellow]⚠️ Telegram Bot не настроен[/yellow]")
-            self.console.print("Настройте Bot через пункт 4 - Настройки")
-            input("Нажмите Enter для продолжения...")
-            return
-        
-        if Confirm.ask("Отправить тестовое сообщение в Telegram?"):
-            try:
-                success = await self.telegram_notifier.send_test_message()
-                if success:
-                    self.console.print("[green]✅ Тестовое сообщение отправлено успешно[/green]")
-                else:
-                    self.console.print("[red]❌ Ошибка отправки тестового сообщения[/red]")
-                    
-            except Exception as e:
-                self.console.print(f"[red]❌ Ошибка тестирования уведомлений: {e}[/red]")
-        
-        input("\nНажмите Enter для продолжения...")
     
     async def show_channels_statistics(self):
         """Показать статистику каналов"""

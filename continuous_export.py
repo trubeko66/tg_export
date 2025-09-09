@@ -288,8 +288,8 @@ class ContinuousExporter:
     async def _cleanup(self):
         """Очистка ресурсов при завершении"""
         try:
-            if self.exporter:
-                await self.exporter.close()
+            if self.exporter and hasattr(self.exporter, 'disconnect'):
+                await self.exporter.disconnect()
             self.console.print("[green]✅ Очистка ресурсов завершена[/green]")
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка очистки: {e}[/red]")

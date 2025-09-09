@@ -53,7 +53,9 @@ class TelegramNotifier:
         """Отправка ежедневной сводки"""
         try:
             if not self.is_configured():
-                self.console.print("[yellow]⚠️ Bot не настроен, сводка не отправлена[/yellow]")
+                self.console.print("[yellow]⚠️ Bot не настроен, сводка сохранена в лог[/yellow]")
+                # Сохраняем сводку в лог файл
+                self._save_report_to_log(report_data)
                 return False
             
             message = self._create_daily_report_message(report_data)
@@ -63,11 +65,15 @@ class TelegramNotifier:
                 self.console.print("[green]✅ Ежедневная сводка отправлена в Telegram[/green]")
             else:
                 self.console.print("[red]❌ Ошибка отправки ежедневной сводки[/red]")
+                # Сохраняем в лог при ошибке отправки
+                self._save_report_to_log(report_data)
             
             return success
             
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка отправки ежедневной сводки: {e}[/red]")
+            # Сохраняем в лог при исключении
+            self._save_report_to_log(report_data)
             return False
     
     async def send_error_notification(self, error_message: str, channel_name: str = ""):
@@ -198,6 +204,27 @@ class TelegramNotifier:
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка отправки сообщения: {e}[/red]")
             return False
+    
+    def _save_report_to_log(self, report_data: dict):
+        """Сохранение отчета в лог файл"""
+        try:
+            from datetime import datetime
+            log_file = Path("daily_reports.log")
+            
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            report_text = self._create_daily_report_message(report_data)
+            
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"\n{'='*50}\n")
+                f.write(f"Ежедневная сводка - {timestamp}\n")
+                f.write(f"{'='*50}\n")
+                f.write(report_text)
+                f.write(f"\n{'='*50}\n")
+            
+            self.console.print(f"[blue]📝 Сводка сохранена в {log_file}[/blue]")
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка сохранения в лог: {e}[/red]")
     
     async def send_test_message(self) -> bool:
         """Отправка тестового сообщения"""

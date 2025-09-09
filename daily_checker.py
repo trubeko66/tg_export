@@ -11,7 +11,6 @@ import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional
-import pytz
 
 from rich.console import Console
 from rich.panel import Panel
@@ -33,7 +32,8 @@ class DailyChannelChecker:
         self.content_filter = ContentFilter()
         self.exporter = None
         self.channels = []
-        self.perm_timezone = pytz.timezone('Asia/Yekaterinburg')  # Пермское время
+        # Пермское время (UTC+5)
+        self.perm_timezone = timezone(timedelta(hours=5))
         
         # Статистика ежедневной проверки
         self.daily_stats = {
@@ -137,8 +137,8 @@ class DailyChannelChecker:
         except Exception as e:
             self.console.print(f"[red]❌ Критическая ошибка ежедневной проверки: {e}[/red]")
         finally:
-            if self.exporter:
-                await self.exporter.close()
+            if self.exporter and hasattr(self.exporter, 'disconnect'):
+                await self.exporter.disconnect()
     
     async def _check_channel_for_new_messages(self, channel: ChannelInfo):
         """Проверка канала на новые сообщения"""
@@ -308,14 +308,10 @@ class DailyChannelChecker:
     async def _send_daily_report(self):
         """Отправка ежедневной сводки в Telegram"""
         try:
-            if not self.config_manager.is_bot_configured():
-                self.console.print("[yellow]⚠️ Bot не настроен, сводка не отправлена[/yellow]")
-                return
-            
             # Формируем сводку
             report = self._create_daily_report()
             
-            # Отправляем в Telegram
+            # Отправляем в Telegram (безусловно)
             await self._send_telegram_message(report)
             
             self.console.print("[green]✅ Ежедневная сводка отправлена в Telegram[/green]")
@@ -356,6 +352,13 @@ class DailyChannelChecker:
             import requests
             
             config = self.config_manager.config
+            
+            # Проверяем настройку бота
+            if not self.config_manager.is_bot_configured():
+                self.console.print("[yellow]⚠️ Bot не настроен, сводка сохранена в лог[/yellow]")
+                self._save_report_to_log(message)
+                return
+            
             url = f"https://api.telegram.org/bot{config.bot.token}/sendMessage"
             data = {
                 'chat_id': config.bot.chat_id,
@@ -370,7 +373,29 @@ class DailyChannelChecker:
                 
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка отправки в Telegram: {e}[/red]")
+            # Сохраняем в лог при ошибке
+            self._save_report_to_log(message)
             raise
+    
+    def _save_report_to_log(self, message: str):
+        """Сохранение отчета в лог файл"""
+        try:
+            from datetime import datetime
+            log_file = Path("daily_reports.log")
+            
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"\n{'='*50}\n")
+                f.write(f"Ежедневная сводка - {timestamp}\n")
+                f.write(f"{'='*50}\n")
+                f.write(message)
+                f.write(f"\n{'='*50}\n")
+            
+            self.console.print(f"[blue]📝 Сводка сохранена в {log_file}[/blue]")
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка сохранения в лог: {e}[/red]")
 
 
 async def main():
