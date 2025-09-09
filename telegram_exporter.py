@@ -421,7 +421,7 @@ class TelegramExporter:
         )
         self.logger = logging.getLogger(__name__)
         
-    async def initialize_client(self):
+    async def initialize_client(self, force_reauth: bool = False):
         """Инициализация Telegram клиента"""
         try:
             # Получение конфигурации из менеджера
@@ -445,8 +445,21 @@ class TelegramExporter:
                 self.console.print("[red]Ошибка: не указан номер телефона[/red]")
                 return False
                 
-            self.client = TelegramClient('session_name', api_id, api_hash)
-            await self.client.start(phone=phone)
+            # Создаем уникальное имя сессии на основе API ID для изоляции
+            session_name = f'session_{api_id}'
+            
+            # Если требуется принудительная повторная авторизация, удаляем старую сессию
+            if force_reauth:
+                await self._clear_session(session_name)
+                self.console.print("[yellow]⚠️ Старая сессия очищена, требуется повторная авторизация[/yellow]")
+            
+            self.client = TelegramClient(session_name, api_id, api_hash)
+            
+            # Запускаем клиент с принудительной авторизацией если требуется
+            if force_reauth:
+                await self.client.start(phone=phone, force_sms=True)
+            else:
+                await self.client.start(phone=phone, force_sms=False)
             
             if await self.client.is_user_authorized():
                 self.console.print("[green]✓ Успешная авторизация в Telegram[/green]")
@@ -460,6 +473,16 @@ class TelegramExporter:
             self.console.print(f"[red]Ошибка инициализации клиента: {e}[/red]")
             self.logger.error(f"Client initialization error: {e}")
             return False
+    
+    async def _clear_session(self, session_name: str):
+        """Очистка файла сессии"""
+        try:
+            session_file = Path(f"{session_name}.session")
+            if session_file.exists():
+                session_file.unlink()
+                self.console.print(f"[blue]🗑️ Удален файл сессии: {session_file}[/blue]")
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️ Не удалось удалить сессию: {e}[/yellow]")
     
     def setup_bot_notifications(self):
         """Настройка уведомлений через бота (теперь через конфигурацию)"""

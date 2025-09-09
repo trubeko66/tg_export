@@ -52,7 +52,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         """Инициализация улучшенного экспортера"""
         try:
             # Инициализируем базовый экспортер
-            await self.initialize_client()
+            await self.initialize_client(force_reauth=False)
             
             # Дополнительная инициализация для улучшенной версии
             self.console.print("[green]Инициализация улучшенных модулей...[/green]")

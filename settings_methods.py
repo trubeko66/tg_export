@@ -86,6 +86,7 @@ class SettingsMethods:
             f"2. ✏️ Изменить API Hash\n"
             f"3. ✏️ Изменить номер телефона\n"
             f"4. 🔄 Сбросить настройки Telegram\n"
+            f"5. 🔐 Принудительная повторная авторизация\n"
             f"0. 🔙 Назад",
             title="📱 Настройки Telegram API",
             border_style="green"
@@ -95,7 +96,7 @@ class SettingsMethods:
         
         choice = Prompt.ask(
             "Выберите действие",
-            choices=["1", "2", "3", "4", "0"]
+            choices=["1", "2", "3", "4", "5", "0"]
         )
         
         if choice == "0":
@@ -126,11 +127,59 @@ class SettingsMethods:
                     config.telegram.api_hash = None
                     config.telegram.phone = None
                     self.console.print("[green]✅ Настройки Telegram сброшены[/green]")
+            
+            elif choice == "5":
+                await self.force_telegram_reauth()
                 
         except Exception as e:
             self.console.print(f"[red]Ошибка: {e}[/red]")
         
         input("\nНажмите Enter для продолжения...")
+    
+    async def force_telegram_reauth(self):
+        """Принудительная повторная авторизация в Telegram"""
+        self.console.clear()
+        
+        info_panel = Panel(
+            "🔐 Принудительная повторная авторизация\n\n"
+            "Эта функция:\n"
+            "• Удалит сохраненную сессию Telegram\n"
+            "• Заставит программу запросить новый код подтверждения\n"
+            "• Потребует ввода облачного пароля (если включен)\n"
+            "• Обеспечит авторизацию с вашими учетными данными\n\n"
+            "⚠️ Внимание: Это действие нельзя отменить!",
+            title="🔐 Повторная авторизация",
+            border_style="yellow"
+        )
+        
+        self.console.print(info_panel)
+        
+        if Confirm.ask("Вы уверены, что хотите принудительно переавторизоваться?"):
+            try:
+                # Импортируем TelegramExporter для очистки сессии
+                from telegram_exporter import TelegramExporter
+                
+                # Создаем временный экспортер для очистки сессии
+                temp_exporter = TelegramExporter()
+                temp_exporter.config_manager = self.config_manager
+                
+                # Получаем конфигурацию
+                config = self.config_manager.config
+                if not config.telegram.api_id:
+                    self.console.print("[red]❌ API ID не настроен[/red]")
+                    return
+                
+                # Очищаем сессию
+                session_name = f'session_{config.telegram.api_id}'
+                await temp_exporter._clear_session(session_name)
+                
+                self.console.print("[green]✅ Сессия Telegram очищена[/green]")
+                self.console.print("[yellow]⚠️ При следующем запуске потребуется повторная авторизация[/yellow]")
+                
+            except Exception as e:
+                self.console.print(f"[red]❌ Ошибка очистки сессии: {e}[/red]")
+        else:
+            self.console.print("[blue]Операция отменена[/blue]")
     
     async def show_bot_settings(self):
         """Настройки бота"""

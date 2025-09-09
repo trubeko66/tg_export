@@ -53,7 +53,7 @@ class DailyChannelChecker:
         try:
             # Создаем базовый экспортер
             self.exporter = TelegramExporter()
-            await self.exporter.initialize_client()
+            await self.exporter.initialize_client(force_reauth=False)
             
             # Загружаем каналы
             if self.config_manager.channels_file_exists():
