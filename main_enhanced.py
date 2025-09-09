@@ -795,16 +795,16 @@ class EnhancedTelegramExporter(TelegramExporter):
         table.add_column("Название", style="green")
         table.add_column("Username", style="blue")
         table.add_column("ID", style="yellow")
-        table.add_column("Подписчики", style="magenta")
+        table.add_column("Сообщений", style="magenta")
         
         for i, channel in enumerate(self.channels, 1):
-            subscribers = f"{channel.subscribers_count:,}" if channel.subscribers_count else "—"
+            messages = f"{channel.total_messages:,}" if channel.total_messages else "—"
             table.add_row(
                 str(i),
                 channel.title,
                 channel.username or "—",
                 str(channel.id) if channel.id else "—",
-                subscribers
+                messages
             )
         
         self.console.print(table)

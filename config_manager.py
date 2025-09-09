@@ -504,13 +504,15 @@ class ConfigManager:
             
             channels_data = []
             for channel in channels:
-                if hasattr(channel, 'title') and hasattr(channel, 'username'):
+                if hasattr(channel, 'title') and hasattr(channel, 'id'):
                     channels_data.append({
+                        'id': getattr(channel, 'id', 0),
                         'title': channel.title,
-                        'username': channel.username,
-                        'id': getattr(channel, 'id', None),
-                        'description': getattr(channel, 'description', ''),
-                        'subscribers_count': getattr(channel, 'subscribers_count', 0)
+                        'username': getattr(channel, 'username', ''),
+                        'last_message_id': getattr(channel, 'last_message_id', 0),
+                        'total_messages': getattr(channel, 'total_messages', 0),
+                        'last_check': getattr(channel, 'last_check', None),
+                        'media_size_mb': getattr(channel, 'media_size_mb', 0.0)
                     })
             
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -541,11 +543,13 @@ class ConfigManager:
             channels = []
             for data in channels_data:
                 channel = ChannelInfo(
+                    id=data.get('id', 0),
                     title=data.get('title', ''),
                     username=data.get('username', ''),
-                    id=data.get('id'),
-                    description=data.get('description', ''),
-                    subscribers_count=data.get('subscribers_count', 0)
+                    last_message_id=data.get('last_message_id', 0),
+                    total_messages=data.get('total_messages', 0),
+                    last_check=data.get('last_check'),
+                    media_size_mb=data.get('media_size_mb', 0.0)
                 )
                 channels.append(channel)
             
