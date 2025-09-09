@@ -83,11 +83,15 @@ class EnhancedTelegramExporter(TelegramExporter):
             self.console.clear()
             
             # Показываем статус системы
+            total_messages = sum(channel.total_messages for channel in self.channels) if self.channels else 0
+            total_size = sum(channel.media_size_mb for channel in self.channels) if self.channels else 0.0
+            
             status_panel = Panel(
                 f"📊 Статус системы\n\n"
-                f"• Каналов в списке: {len(self.channels)}\n"
+                f"• Каналов в списке: {len(self.channels) if self.channels else 0}\n"
+                f"• Всего сообщений: {total_messages:,}\n"
+                f"• Общий размер данных: {total_size:.1f} МБ\n"
                 f"• Последний экспорт: {self.stats.last_export_time or 'Никогда'}\n"
-                f"• Всего сообщений: {self.stats.total_messages:,}\n"
                 f"• Ошибок экспорта: {self.stats.export_errors}\n"
                 f"• Отфильтровано: {self.stats.filtered_messages:,}",
                 title="ℹ️ Информация",
@@ -112,6 +116,36 @@ class EnhancedTelegramExporter(TelegramExporter):
             )
             
             self.console.print(status_panel)
+            
+            # Показываем таблицу каналов если они есть
+            if self.channels and len(self.channels) > 0:
+                channels_table = Table(title=f"📋 Загруженные каналы ({len(self.channels)})", box=box.ROUNDED)
+                channels_table.add_column("№", style="cyan", width=3, justify="center")
+                channels_table.add_column("Название", style="green")
+                channels_table.add_column("Сообщений", style="yellow", justify="right", width=10)
+                channels_table.add_column("Размер (МБ)", style="magenta", justify="right", width=10)
+                channels_table.add_column("Последняя проверка", style="dim", width=15)
+                
+                for i, channel in enumerate(self.channels[:10], 1):  # Показываем первые 10 каналов
+                    messages = f"{channel.total_messages:,}" if channel.total_messages else "—"
+                    size = f"{channel.media_size_mb:.1f}" if channel.media_size_mb else "—"
+                    last_check = channel.last_check or "Никогда"
+                    if len(last_check) > 15:
+                        last_check = last_check[:12] + "..."
+                    
+                    channels_table.add_row(
+                        str(i),
+                        channel.title[:30] + "..." if len(channel.title) > 30 else channel.title,
+                        messages,
+                        size,
+                        last_check
+                    )
+                
+                if len(self.channels) > 10:
+                    channels_table.add_row("...", f"и еще {len(self.channels) - 10} каналов", "...", "...", "...")
+                
+                self.console.print(channels_table)
+            
             self.console.print(menu_panel)
             
             choice = Prompt.ask(
@@ -1508,22 +1542,52 @@ class EnhancedTelegramExporter(TelegramExporter):
             input("Нажмите Enter для продолжения...")
             return
         
-        table = Table(title=f"📋 Список каналов ({len(self.channels)})")
-        table.add_column("№", style="cyan", width=3)
-        table.add_column("Название", style="green")
-        table.add_column("Username", style="blue")
-        table.add_column("ID", style="yellow")
-        table.add_column("Сообщений", style="magenta")
+        table = Table(title=f"📋 Список каналов ({len(self.channels)})", box=box.ROUNDED)
+        table.add_column("№", style="cyan", width=3, justify="center")
+        table.add_column("Название", style="green", ratio=2)
+        table.add_column("Username", style="blue", width=15)
+        table.add_column("ID", style="yellow", width=12)
+        table.add_column("Сообщений", style="magenta", justify="right", width=10)
+        table.add_column("Размер (МБ)", style="red", justify="right", width=10)
+        table.add_column("Последняя проверка", style="dim", width=15)
+        
+        total_messages = 0
+        total_size = 0.0
         
         for i, channel in enumerate(self.channels, 1):
-            messages = f"{channel.total_messages:,}" if channel.total_messages else "—"
+            messages = channel.total_messages or 0
+            size = channel.media_size_mb or 0.0
+            last_check = channel.last_check or "Никогда"
+            
+            total_messages += messages
+            total_size += size
+            
+            # Обрезаем длинные строки
+            title = channel.title[:40] + "..." if len(channel.title) > 40 else channel.title
+            username = (channel.username or "—")[:12] + "..." if channel.username and len(channel.username) > 12 else (channel.username or "—")
+            last_check_short = last_check[:12] + "..." if len(last_check) > 12 else last_check
+            
             table.add_row(
                 str(i),
-                channel.title,
-                channel.username or "—",
+                title,
+                username,
                 str(channel.id) if channel.id else "—",
-                messages
+                f"{messages:,}",
+                f"{size:.1f}",
+                last_check_short
             )
+        
+        # Добавляем строку с итогами
+        table.add_section()
+        table.add_row(
+            "ИТОГО:",
+            f"{len(self.channels)} каналов",
+            "",
+            "",
+            f"{total_messages:,}",
+            f"{total_size:.1f}",
+            ""
+        )
         
         self.console.print(table)
         input("\nНажмите Enter для продолжения...")
@@ -1646,16 +1710,18 @@ class EnhancedTelegramExporter(TelegramExporter):
             return
         
         # Создаем таблицу статистики
-        table = Table(title=f"📊 Статистика каналов ({len(self.channels)})")
-        table.add_column("№", style="cyan", width=3)
-        table.add_column("Название", style="green")
-        table.add_column("Username", style="blue")
-        table.add_column("Сообщений", style="yellow", justify="right")
-        table.add_column("Размер (МБ)", style="magenta", justify="right")
-        table.add_column("Последняя проверка", style="dim")
+        table = Table(title=f"📊 Статистика каналов ({len(self.channels)})", box=box.ROUNDED)
+        table.add_column("№", style="cyan", width=3, justify="center")
+        table.add_column("Название", style="green", ratio=2)
+        table.add_column("Username", style="blue", width=15)
+        table.add_column("Сообщений", style="yellow", justify="right", width=10)
+        table.add_column("Размер (МБ)", style="magenta", justify="right", width=10)
+        table.add_column("Последняя проверка", style="dim", width=15)
+        table.add_column("Статус", style="red", width=12, justify="center")
         
         total_messages = 0
         total_size = 0.0
+        active_channels = 0
         
         for i, channel in enumerate(self.channels, 1):
             messages = channel.total_messages or 0
@@ -1665,24 +1731,46 @@ class EnhancedTelegramExporter(TelegramExporter):
             total_messages += messages
             total_size += size
             
+            # Определяем статус канала
+            if last_check != "Никогда":
+                active_channels += 1
+                status = "✅ Активен"
+                status_style = "green"
+            else:
+                status = "⏳ Не проверен"
+                status_style = "yellow"
+            
+            # Обрезаем длинные строки
+            title = channel.title[:35] + "..." if len(channel.title) > 35 else channel.title
+            username = (channel.username or "—")[:12] + "..." if channel.username and len(channel.username) > 12 else (channel.username or "—")
+            last_check_short = last_check[:12] + "..." if len(last_check) > 12 else last_check
+            
             table.add_row(
                 str(i),
-                channel.title,
-                channel.username or "—",
+                title,
+                username,
                 f"{messages:,}",
                 f"{size:.1f}",
-                last_check
+                last_check_short,
+                f"[{status_style}]{status}[/{status_style}]"
             )
         
         self.console.print(table)
         
         # Показываем общую статистику
+        avg_messages = total_messages // len(self.channels) if self.channels else 0
+        avg_size = total_size / len(self.channels) if self.channels else 0.0
+        inactive_channels = len(self.channels) - active_channels
+        
         summary_panel = Panel(
             f"📈 Общая статистика\n\n"
             f"• Всего каналов: {len(self.channels)}\n"
+            f"• Активных каналов: {active_channels}\n"
+            f"• Неактивных каналов: {inactive_channels}\n"
             f"• Всего сообщений: {total_messages:,}\n"
             f"• Общий размер: {total_size:.1f} МБ\n"
-            f"• Среднее сообщений на канал: {total_messages // len(self.channels) if self.channels else 0:,}",
+            f"• Среднее сообщений на канал: {avg_messages:,}\n"
+            f"• Средний размер канала: {avg_size:.1f} МБ",
             title="📊 Сводка",
             border_style="blue"
         )
