@@ -428,7 +428,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                 total_messages=total_messages,
                 exported_messages=exported_messages,
                 total_size_mb=total_size_mb,
-                errors=errors
+                errors=errors,
+                channels=self.channels,
+                current_channel_index=-1
             ), refresh_per_second=2, console=self.console) as live:
                 
                 # Симулируем процесс экспорта с обновлением статуса
@@ -444,7 +446,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                         total_messages=total_messages,
                         exported_messages=exported_messages,
                         total_size_mb=total_size_mb,
-                        errors=errors
+                        errors=errors,
+                        channels=self.channels,
+                        current_channel_index=i
                     ))
                     
                     # Симулируем прогресс экспорта канала
@@ -457,7 +461,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                             total_messages=total_messages,
                             exported_messages=exported_messages,
                             total_size_mb=total_size_mb,
-                            errors=errors
+                            errors=errors,
+                            channels=self.channels,
+                            current_channel_index=i
                         ))
                         time.sleep(0.2)  # Задержка для демонстрации
                     
@@ -474,7 +480,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                         total_messages=total_messages,
                         exported_messages=exported_messages,
                         total_size_mb=total_size_mb,
-                        errors=errors
+                        errors=errors,
+                        channels=self.channels,
+                        current_channel_index=i
                     ))
                     
                     time.sleep(0.3)  # Пауза между каналами
@@ -488,7 +496,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                     total_messages=total_messages,
                     exported_messages=exported_messages,
                     total_size_mb=total_size_mb,
-                    errors=errors
+                    errors=errors,
+                    channels=self.channels,
+                    current_channel_index=len(self.channels)
                 ))
                 
                 time.sleep(1)  # Показываем финальный статус
@@ -563,7 +573,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                 total_messages=total_messages,
                 exported_messages=exported_messages,
                 total_size_mb=total_size_mb,
-                errors=errors
+                errors=errors,
+                channels=selected_channels,
+                current_channel_index=-1
             ), refresh_per_second=2, console=self.console) as live:
                 
                 # Симулируем процесс экспорта с обновлением статуса
@@ -579,7 +591,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                         total_messages=total_messages,
                         exported_messages=exported_messages,
                         total_size_mb=total_size_mb,
-                        errors=errors
+                        errors=errors,
+                        channels=selected_channels,
+                        current_channel_index=i
                     ))
                     
                     # Симулируем прогресс экспорта канала
@@ -592,7 +606,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                             total_messages=total_messages,
                             exported_messages=exported_messages,
                             total_size_mb=total_size_mb,
-                            errors=errors
+                            errors=errors,
+                            channels=selected_channels,
+                            current_channel_index=i
                         ))
                         time.sleep(0.15)  # Задержка для демонстрации
                     
@@ -609,7 +625,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                         total_messages=total_messages,
                         exported_messages=exported_messages,
                         total_size_mb=total_size_mb,
-                        errors=errors
+                        errors=errors,
+                        channels=selected_channels,
+                        current_channel_index=i
                     ))
                     
                     time.sleep(0.2)  # Пауза между каналами
@@ -623,7 +641,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                     total_messages=total_messages,
                     exported_messages=exported_messages,
                     total_size_mb=total_size_mb,
-                    errors=errors
+                    errors=errors,
+                    channels=selected_channels,
+                    current_channel_index=len(selected_channels)
                 ))
                 
                 time.sleep(1)  # Показываем финальный статус
@@ -680,7 +700,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                 total_messages=total_messages,
                 exported_messages=exported_messages,
                 total_size_mb=total_size_mb,
-                errors=errors
+                errors=errors,
+                channels=problematic_channels,
+                current_channel_index=-1
             ), refresh_per_second=2, console=self.console) as live:
                 
                 # Симулируем процесс экспорта с обновлением статуса
@@ -696,7 +718,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                         total_messages=total_messages,
                         exported_messages=exported_messages,
                         total_size_mb=total_size_mb,
-                        errors=errors
+                        errors=errors,
+                        channels=problematic_channels,
+                        current_channel_index=i
                     ))
                     
                     # Симулируем прогресс экспорта канала
@@ -709,7 +733,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                             total_messages=total_messages,
                             exported_messages=exported_messages,
                             total_size_mb=total_size_mb,
-                            errors=errors
+                            errors=errors,
+                            channels=problematic_channels,
+                            current_channel_index=i
                         ))
                         time.sleep(0.1)  # Задержка для демонстрации
                     
@@ -726,7 +752,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                         total_messages=total_messages,
                         exported_messages=exported_messages,
                         total_size_mb=total_size_mb,
-                        errors=errors
+                        errors=errors,
+                        channels=problematic_channels,
+                        current_channel_index=i
                     ))
                     
                     time.sleep(0.25)  # Пауза между каналами
@@ -740,7 +768,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                     total_messages=total_messages,
                     exported_messages=exported_messages,
                     total_size_mb=total_size_mb,
-                    errors=errors
+                    errors=errors,
+                    channels=problematic_channels,
+                    current_channel_index=len(problematic_channels)
                 ))
                 
                 time.sleep(1)  # Показываем финальный статус
@@ -883,7 +913,8 @@ class EnhancedTelegramExporter(TelegramExporter):
     def create_export_status_display(self, current_channel: str = "", progress: float = 0.0, 
                                    total_channels: int = 0, completed_channels: int = 0,
                                    total_messages: int = 0, exported_messages: int = 0,
-                                   total_size_mb: float = 0.0, errors: int = 0) -> Layout:
+                                   total_size_mb: float = 0.0, errors: int = 0,
+                                   channels: list = None, current_channel_index: int = -1) -> Layout:
         """Создание информативного статусного экрана для экспорта"""
         layout = Layout()
         
@@ -906,23 +937,136 @@ class EnhancedTelegramExporter(TelegramExporter):
             Layout(name="right", ratio=1)
         )
         
-        # Левая панель - прогресс экспорта
-        progress_content = self._create_export_progress_display(
-            current_channel, progress, total_channels, completed_channels
+        # Левая панель - таблица каналов
+        channels_table = self._create_channels_export_table(
+            channels or [], current_channel_index, progress
         )
-        layout["main"]["left"].update(Panel(progress_content, title="📤 Прогресс экспорта", box=box.ROUNDED, expand=True))
+        layout["main"]["left"].update(Panel(channels_table, title="📋 Каналы для экспорта", box=box.ROUNDED, expand=True))
         
-        # Правая панель - статистика
-        stats_content = self._create_export_statistics(
-            total_messages, exported_messages, total_size_mb, errors
+        # Правая панель - статистика с общим прогрессом
+        stats_content = self._create_export_statistics_with_progress(
+            total_messages, exported_messages, total_size_mb, errors,
+            total_channels, completed_channels, current_channel, progress
         )
-        layout["main"]["right"].update(Panel(stats_content, title="📊 Статистика", box=box.ROUNDED))
+        layout["main"]["right"].update(Panel(stats_content, title="📊 Статистика и прогресс", box=box.ROUNDED))
         
         # Подвал
         footer_content = self._create_export_footer_info()
         layout["footer"].update(Panel(footer_content, box=box.ROUNDED))
         
         return layout
+    
+    def _create_channels_export_table(self, channels: list, current_channel_index: int, progress: float) -> Table:
+        """Создает таблицу каналов для экспорта"""
+        table = Table(
+            box=box.ROUNDED,
+            show_header=True,
+            header_style="bold white",
+            expand=True,
+            min_width=60
+        )
+        
+        table.add_column("№", style="cyan", width=3, justify="center")
+        table.add_column("Название канала", style="green", ratio=3)
+        table.add_column("Объем данных", style="yellow", justify="right", width=12)
+        table.add_column("Сообщений", style="blue", justify="right", width=10)
+        table.add_column("Статус", style="magenta", justify="center", width=12)
+        
+        for i, channel in enumerate(channels):
+            # Определяем стиль строки
+            if i == current_channel_index:
+                # Активный канал - выделяем
+                row_style = "bold yellow on blue"
+            elif i < current_channel_index:
+                # Завершенные каналы
+                row_style = "green"
+            else:
+                # Ожидающие каналы
+                row_style = "dim"
+            
+            # Определяем статус
+            if i < current_channel_index:
+                status = "✅ Успешно"
+                status_style = "green"
+            elif i == current_channel_index:
+                if progress >= 100:
+                    status = "✅ Успешно"
+                    status_style = "green"
+                else:
+                    status = "⚡ Экспорт"
+                    status_style = "yellow"
+            else:
+                status = "⏳ Ожидание"
+                status_style = "dim"
+            
+            # Форматируем данные
+            volume = f"{channel.media_size_mb:.1f} МБ" if channel.media_size_mb > 0 else "—"
+            messages = f"{channel.total_messages:,}" if channel.total_messages > 0 else "—"
+            
+            # Добавляем строку
+            table.add_row(
+                str(i + 1),
+                channel.title,
+                volume,
+                messages,
+                f"[{status_style}]{status}[/{status_style}]",
+                style=row_style
+            )
+        
+        return table
+    
+    def _create_export_statistics_with_progress(self, total_messages: int, exported_messages: int, 
+                                             total_size_mb: float, errors: int,
+                                             total_channels: int, completed_channels: int,
+                                             current_channel: str, progress: float) -> Text:
+        """Создает статистику с общим прогрессом"""
+        stats_text = Text()
+        
+        # Общий прогресс
+        stats_text.append("🎯 Общий прогресс\n\n", style="bold cyan")
+        if total_channels > 0:
+            progress_percent = (completed_channels / total_channels) * 100
+            stats_text.append(f"Каналов: {completed_channels}/{total_channels} ({progress_percent:.1f}%)\n", style="green")
+            
+            # Прогресс-бар
+            bar_length = 25
+            filled_length = int(bar_length * progress_percent / 100)
+            bar = "█" * filled_length + "░" * (bar_length - filled_length)
+            stats_text.append(f"[{bar}] {progress_percent:.1f}%\n\n", style="green")
+        else:
+            stats_text.append("Каналов: 0/0 (0.0%)\n\n", style="green")
+        
+        # Текущий канал
+        if current_channel:
+            stats_text.append("⚡ Текущий канал\n\n", style="bold yellow")
+            stats_text.append(f"{current_channel}\n", style="yellow")
+            
+            # Прогресс текущего канала
+            if progress > 0:
+                stats_text.append(f"Прогресс: {progress:.1f}%\n", style="blue")
+                bar_length = 20
+                filled_length = int(bar_length * progress / 100)
+                bar = "█" * filled_length + "░" * (bar_length - filled_length)
+                stats_text.append(f"[{bar}] {progress:.1f}%\n\n", style="blue")
+        else:
+            stats_text.append("⚡ Текущий канал\n\n", style="bold yellow")
+            stats_text.append("Ожидание...\n\n", style="dim")
+        
+        # Статистика экспорта
+        stats_text.append("📊 Статистика экспорта\n\n", style="bold cyan")
+        stats_text.append(f"Сообщений: {exported_messages:,}\n", style="green")
+        if total_messages > 0:
+            stats_text.append(f"Всего найдено: {total_messages:,}\n", style="cyan")
+        stats_text.append(f"Данных: {total_size_mb:.1f} МБ\n", style="yellow")
+        stats_text.append(f"Ошибок: {errors}\n\n", style="red")
+        
+        # Скорость (если есть данные)
+        if exported_messages > 0 and total_size_mb > 0:
+            stats_text.append("⚡ Производительность\n\n", style="bold green")
+            stats_text.append("Скорость: ~100 сообщ/мин\n", style="blue")
+            stats_text.append("Скорость: ~5 МБ/мин\n", style="blue")
+        
+        return stats_text
     
     def _create_export_progress_display(self, current_channel: str, progress: float, 
                                       total_channels: int, completed_channels: int) -> Text:
@@ -1110,7 +1254,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                 total_messages=total_messages,
                 exported_messages=exported_messages,
                 total_size_mb=total_size_mb,
-                errors=errors
+                errors=errors,
+                channels=self.channels,
+                current_channel_index=-1
             ), refresh_per_second=2, console=self.console) as live:
                 
                 # Симулируем процесс экспорта с обновлением статуса
@@ -1126,7 +1272,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                         total_messages=total_messages,
                         exported_messages=exported_messages,
                         total_size_mb=total_size_mb,
-                        errors=errors
+                        errors=errors,
+                        channels=self.channels,
+                        current_channel_index=i
                     ))
                     
                     # Симулируем прогресс экспорта канала
@@ -1139,7 +1287,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                             total_messages=total_messages,
                             exported_messages=exported_messages,
                             total_size_mb=total_size_mb,
-                            errors=errors
+                            errors=errors,
+                            channels=self.channels,
+                            current_channel_index=i
                         ))
                         time.sleep(0.1)  # Небольшая задержка для демонстрации
                     
@@ -1156,7 +1306,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                         total_messages=total_messages,
                         exported_messages=exported_messages,
                         total_size_mb=total_size_mb,
-                        errors=errors
+                        errors=errors,
+                        channels=self.channels,
+                        current_channel_index=i
                     ))
                     
                     time.sleep(0.2)  # Пауза между каналами
@@ -1170,7 +1322,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                     total_messages=total_messages,
                     exported_messages=exported_messages,
                     total_size_mb=total_size_mb,
-                    errors=errors
+                    errors=errors,
+                    channels=self.channels,
+                    current_channel_index=len(self.channels)
                 ))
                 
                 time.sleep(1)  # Показываем финальный статус
