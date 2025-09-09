@@ -2897,6 +2897,30 @@ class TelegramExporter:
             # Гарантируем очистку состояния
             self.stats.current_export_info = None
     
+    async def export_all_channels(self):
+        """Экспорт всех каналов"""
+        self.logger.info("Starting scheduled export of all channels")
+        
+        for i, channel in enumerate(self.channels):
+            try:
+                # Обновляем информацию о текущем экспорте для авто-прокрутки
+                self.stats.current_export_info = f"Экспорт {i+1}/{len(self.channels)}: {channel.title}"
+                await self.export_channel(channel)
+            except Exception as e:
+                self.logger.error(f"Export error for channel {channel.title}: {e}")
+                self.stats.export_errors += 1
+            finally:
+                # Очищаем информацию о текущем экспорте между каналами
+                self.stats.current_export_info = None
+                # Небольшая пауза для обновления UI
+                await asyncio.sleep(0.5)
+        
+        self.stats.last_export_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Обновляем статистику обнаруженных/экспортированных сообщений
+        self._update_discovered_exported_stats()
+        # Окончательно очищаем информацию о экспорте
+        self.stats.current_export_info = None
+
     async def run(self):
         """Главный метод запуска программы"""
         self.console.print(Panel.fit(
