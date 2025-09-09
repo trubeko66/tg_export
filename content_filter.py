@@ -52,6 +52,12 @@ class ContentFilter:
             'udemy', 'юдеми',
             'умскул', 'foxford', 'фоксфорд',
             'яндекс лице', 'лицей яндекса',
+            # Добавленные платформы
+            'proglib', 'proglib academy', 'проглиб', 'проглиб академи',
+            'elbrus', 'elbrus bootcamp', 'эльбрус', 'эльбрус буткемп',
+            'itmo', 'итмо',
+            'hse', 'hse university', 'вышка', 'вшэ',
+            'saint code', 'saint code bootcamp', 'сэйнт код', 'сэйнт код буткемп'
         }
         
         # События

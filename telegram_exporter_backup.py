@@ -1162,13 +1162,22 @@ class TelegramExporter:
     
     async def run_scheduler(self):
         """Запуск планировщика задач"""
-        # Планируем ежедневную проверку в 6:00 по Московскому времени (MSK = UTC+3)
-        # Schedule for 3:00 UTC which is 6:00 MSK
-        schedule.every().day.at("03:00").do(lambda: asyncio.create_task(self._daily_check_new_messages()))
-        
         while self.running:
             schedule.run_pending()
             await asyncio.sleep(60)  # Проверка каждую минуту
+
+    def _create_footer_info(self) -> Text:
+        """Создает информацию для подвала с инструкциями"""
+        footer_text = Text()
+        
+        footer_text.append("🎮 Управление: ", style="bold white")
+        footer_text.append("Программа работает автоматически\n", style="dim")
+        footer_text.append("🔧 Настройки: ", style="bold white")
+        footer_text.append("Доступны при запуске программы\n", style="dim")
+        footer_text.append("🛑 Остановка: ", style="bold white")
+        footer_text.append("Ctrl+C для завершения работы", style="dim")
+        
+        return footer_text
     
     def scroll_channels_up(self):
         """Прокрутка списка каналов вверх"""
@@ -1647,7 +1656,14 @@ class TelegramExporter:
             self.logger.error(f"Error reexporting {channel.title} to all formats: {e}")
             raise
 
-
+    async def run_scheduler(self):
+        """Запуск планировщика задач"""
+        # Планируем ежедневную проверку в 6:00 по Московскому времени
+        schedule.every().day.at("06:00").do(lambda: asyncio.create_task(self._daily_check_new_messages()))
+        
+        while self.running:
+            schedule.run_pending()
+            await asyncio.sleep(60)  # Проверка каждую минуту
 
     async def _daily_check_new_messages(self):
         """Ежедневная проверка новых сообщений в 6:00 по Московскому времени"""
@@ -1826,6 +1842,29 @@ class TelegramExporter:
 
 📁 Новые сообщения добавлены в соответствующие MD файлы
         """.strip()
+        try:
+            for i, channel in enumerate(self.channels):
+                try:
+                    # Обновляем информацию о текущем экспорте для авто-прокрутки
+                    self.stats.current_export_info = f"Экспорт {i+1}/{len(self.channels)}: {channel.title}"
+                    await self.export_channel(channel)
+                except Exception as e:
+                    self.logger.error(f"Export error for channel {channel.title}: {e}")
+                    self.stats.export_errors += 1
+                finally:
+                    # Очищаем информацию о текущем экспорте между каналами
+                    self.stats.current_export_info = None
+                    # Небольшая пауза для обновления UI
+                    await asyncio.sleep(0.5)
+            
+            self.stats.last_export_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Обновляем статистику обнаруженных/экспортированных сообщений
+            self._update_discovered_exported_stats()
+            # Окончательно очищаем информацию о экспорте
+            self.stats.current_export_info = None
+        finally:
+            # Восстанавливаем оригинальное значение флага
+            self._in_md_verification = original_in_md_verification
     
     async def export_channel(self, channel: ChannelInfo):
         """Экспорт конкретного канала"""

@@ -1826,6 +1826,23 @@ class TelegramExporter:
 
 📁 Новые сообщения добавлены в соответствующие MD файлы
         """.strip()
+                except Exception as e:
+                    self.logger.error(f"Export error for channel {channel.title}: {e}")
+                    self.stats.export_errors += 1
+                finally:
+                    # Очищаем информацию о текущем экспорте между каналами
+                    self.stats.current_export_info = None
+                    # Небольшая пауза для обновления UI
+                    await asyncio.sleep(0.5)
+            
+            self.stats.last_export_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Обновляем статистику обнаруженных/экспортированных сообщений
+            self._update_discovered_exported_stats()
+            # Окончательно очищаем информацию о экспорте
+            self.stats.current_export_info = None
+        finally:
+            # Восстанавливаем оригинальное значение флага
+            self._in_md_verification = original_in_md_verification
     
     async def export_channel(self, channel: ChannelInfo):
         """Экспорт конкретного канала"""
