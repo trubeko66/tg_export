@@ -1036,6 +1036,26 @@ class TelegramExporter:
         
         return stats_text
 
+    def _create_footer_info(self) -> Text:
+        """Создает информацию для подвала"""
+        footer_text = Text()
+        
+        # Информация о программе
+        footer_text.append("🚀 Telegram Channel Exporter v1.2.0", style="bold green")
+        footer_text.append(" | ", style="dim")
+        footer_text.append("Нажмите Ctrl+C для выхода", style="yellow")
+        
+        # Информация о статусе
+        if self.stats.current_export_info:
+            footer_text.append(" | ", style="dim")
+            footer_text.append("⚡ Экспорт активен", style="green")
+        
+        if self.stats.md_verification_status:
+            footer_text.append(" | ", style="dim")
+            footer_text.append("📁 Проверка MD", style="blue")
+        
+        return footer_text
+
     def _update_discovered_exported_stats(self):
         """Обновляет статистику обнаруженных и экспортированных сообщений"""
         try:
