@@ -52,7 +52,17 @@ class EnhancedTelegramExporter(TelegramExporter):
             
             # Загружаем каналы если они есть
             if not self.channels:
-                self.console.print("[yellow]Каналы не загружены. Используйте обычную версию для настройки.[/yellow]")
+                # Пытаемся загрузить каналы из файла
+                if self.config_manager.channels_file_exists():
+                    self.console.print("[blue]Загрузка каналов из файла...[/blue]")
+                    imported_channels = self.config_manager.import_channels()
+                    if imported_channels:
+                        self.channels = imported_channels
+                        self.console.print(f"[green]✅ Загружено {len(imported_channels)} каналов из файла[/green]")
+                    else:
+                        self.console.print("[yellow]Не удалось загрузить каналы из файла[/yellow]")
+                else:
+                    self.console.print("[yellow]Каналы не загружены. Используйте обычную версию для настройки.[/yellow]")
             
             self.console.print("[green]✅ Инициализация завершена[/green]")
             
@@ -86,6 +96,7 @@ class EnhancedTelegramExporter(TelegramExporter):
                 "4. ⚙️ Настройки\n"
                 "5. 📋 Логи\n"
                 "6. 🎯 Улучшенный CLI интерфейс\n"
+                "7. 📁 Импорт/Экспорт каналов\n"
                 "0. 🚪 Выход",
                 title="📋 Главное меню",
                 border_style="green"
@@ -96,7 +107,7 @@ class EnhancedTelegramExporter(TelegramExporter):
             
             choice = Prompt.ask(
                 "Выберите действие",
-                choices=["1", "2", "3", "4", "5", "6", "0", "q", "quit"]
+                choices=["1", "2", "3", "4", "5", "6", "7", "0", "q", "quit"]
             )
             
             if choice in ["0", "q", "quit"]:
@@ -117,6 +128,8 @@ class EnhancedTelegramExporter(TelegramExporter):
                     await self.show_logs_menu()
                 elif choice == "6":
                     await self.show_enhanced_cli()
+                elif choice == "7":
+                    await self.show_channels_import_export_menu()
                     
             except KeyboardInterrupt:
                 if Confirm.ask("\nПрервать операцию?"):
@@ -597,6 +610,245 @@ class EnhancedTelegramExporter(TelegramExporter):
         if len(sanitized) > 100:
             sanitized = sanitized[:100] + "..."
         return sanitized
+    
+    async def show_channels_import_export_menu(self):
+        """Показать меню импорта/экспорта каналов"""
+        while True:
+            self.console.clear()
+            
+            # Показываем информацию о файле каналов
+            channels_file = self.config_manager.get_channels_file_path()
+            file_exists = self.config_manager.channels_file_exists()
+            
+            info_panel = Panel(
+                f"📁 Управление каналами\n\n"
+                f"Файл каналов: {channels_file}\n"
+                f"Статус: {'✅ Существует' if file_exists else '❌ Не найден'}\n"
+                f"Загружено каналов: {len(self.channels) if self.channels else 0}",
+                title="📁 Информация о каналах",
+                border_style="blue"
+            )
+            
+            menu_panel = Panel(
+                "📁 Импорт/Экспорт каналов\n\n"
+                "1. 📤 Экспорт каналов в файл\n"
+                "2. 📥 Импорт каналов из файла\n"
+                "3. 🔄 Перезагрузить каналы из файла\n"
+                "4. 📋 Показать список каналов\n"
+                "5. 🗑️ Очистить список каналов\n"
+                "6. 📁 Изменить путь к файлу каналов\n"
+                "0. 🔙 Назад",
+                title="📁 Меню каналов",
+                border_style="green"
+            )
+            
+            self.console.print(info_panel)
+            self.console.print(menu_panel)
+            
+            choice = Prompt.ask(
+                "Выберите действие",
+                choices=["1", "2", "3", "4", "5", "6", "0"]
+            )
+            
+            if choice == "0":
+                break
+            
+            try:
+                if choice == "1":
+                    await self.export_channels_to_file()
+                elif choice == "2":
+                    await self.import_channels_from_file()
+                elif choice == "3":
+                    await self.reload_channels_from_file()
+                elif choice == "4":
+                    await self.show_channels_list()
+                elif choice == "5":
+                    await self.clear_channels_list()
+                elif choice == "6":
+                    await self.change_channels_file_path()
+                    
+            except Exception as e:
+                self.console.print(f"[red]Ошибка: {e}[/red]")
+                input("Нажмите Enter для продолжения...")
+    
+    async def export_channels_to_file(self):
+        """Экспорт каналов в файл"""
+        self.console.clear()
+        
+        if not self.channels:
+            self.console.print("[yellow]⚠️ Список каналов пуст[/yellow]")
+            input("Нажмите Enter для продолжения...")
+            return
+        
+        # Показываем список каналов для экспорта
+        table = Table(title="📤 Каналы для экспорта")
+        table.add_column("№", style="cyan", width=3)
+        table.add_column("Название", style="green")
+        table.add_column("Username", style="blue")
+        table.add_column("ID", style="yellow")
+        
+        for i, channel in enumerate(self.channels, 1):
+            table.add_row(
+                str(i),
+                channel.title,
+                channel.username or "—",
+                str(channel.id) if channel.id else "—"
+            )
+        
+        self.console.print(table)
+        
+        # Выбор файла для экспорта
+        default_file = self.config_manager.get_channels_file_path()
+        file_path = Prompt.ask(
+            "Введите путь к файлу для экспорта",
+            default=default_file
+        )
+        
+        if Confirm.ask(f"Экспортировать {len(self.channels)} каналов в {file_path}?"):
+            success = self.config_manager.export_channels(self.channels, file_path)
+            if success:
+                self.console.print(f"[green]✅ Экспорт завершен: {file_path}[/green]")
+            else:
+                self.console.print("[red]❌ Ошибка экспорта[/red]")
+        
+        input("\nНажмите Enter для продолжения...")
+    
+    async def import_channels_from_file(self):
+        """Импорт каналов из файла"""
+        self.console.clear()
+        
+        # Выбор файла для импорта
+        default_file = self.config_manager.get_channels_file_path()
+        file_path = Prompt.ask(
+            "Введите путь к файлу для импорта",
+            default=default_file
+        )
+        
+        if not Path(file_path).exists():
+            self.console.print(f"[red]❌ Файл не найден: {file_path}[/red]")
+            input("Нажмите Enter для продолжения...")
+            return
+        
+        # Импортируем каналы
+        imported_channels = self.config_manager.import_channels(file_path)
+        
+        if imported_channels:
+            # Показываем импортированные каналы
+            table = Table(title="📥 Импортированные каналы")
+            table.add_column("№", style="cyan", width=3)
+            table.add_column("Название", style="green")
+            table.add_column("Username", style="blue")
+            table.add_column("ID", style="yellow")
+            
+            for i, channel in enumerate(imported_channels, 1):
+                table.add_row(
+                    str(i),
+                    channel.title,
+                    channel.username or "—",
+                    str(channel.id) if channel.id else "—"
+                )
+            
+            self.console.print(table)
+            
+            if Confirm.ask(f"Заменить текущий список каналов ({len(self.channels) if self.channels else 0}) на импортированный ({len(imported_channels)})?"):
+                self.channels = imported_channels
+                self.console.print("[green]✅ Список каналов обновлен[/green]")
+            else:
+                self.console.print("[yellow]Импорт отменен[/yellow]")
+        else:
+            self.console.print("[red]❌ Не удалось импортировать каналы[/red]")
+        
+        input("\nНажмите Enter для продолжения...")
+    
+    async def reload_channels_from_file(self):
+        """Перезагрузить каналы из файла"""
+        self.console.clear()
+        
+        channels_file = self.config_manager.get_channels_file_path()
+        
+        if not self.config_manager.channels_file_exists():
+            self.console.print(f"[red]❌ Файл каналов не найден: {channels_file}[/red]")
+            input("Нажмите Enter для продолжения...")
+            return
+        
+        if Confirm.ask(f"Перезагрузить каналы из {channels_file}?"):
+            imported_channels = self.config_manager.import_channels()
+            if imported_channels:
+                self.channels = imported_channels
+                self.console.print(f"[green]✅ Загружено {len(imported_channels)} каналов[/green]")
+            else:
+                self.console.print("[red]❌ Ошибка загрузки каналов[/red]")
+        
+        input("\nНажмите Enter для продолжения...")
+    
+    async def show_channels_list(self):
+        """Показать список каналов"""
+        self.console.clear()
+        
+        if not self.channels:
+            self.console.print("[yellow]⚠️ Список каналов пуст[/yellow]")
+            input("Нажмите Enter для продолжения...")
+            return
+        
+        table = Table(title=f"📋 Список каналов ({len(self.channels)})")
+        table.add_column("№", style="cyan", width=3)
+        table.add_column("Название", style="green")
+        table.add_column("Username", style="blue")
+        table.add_column("ID", style="yellow")
+        table.add_column("Подписчики", style="magenta")
+        
+        for i, channel in enumerate(self.channels, 1):
+            subscribers = f"{channel.subscribers_count:,}" if channel.subscribers_count else "—"
+            table.add_row(
+                str(i),
+                channel.title,
+                channel.username or "—",
+                str(channel.id) if channel.id else "—",
+                subscribers
+            )
+        
+        self.console.print(table)
+        input("\nНажмите Enter для продолжения...")
+    
+    async def clear_channels_list(self):
+        """Очистить список каналов"""
+        self.console.clear()
+        
+        if not self.channels:
+            self.console.print("[yellow]⚠️ Список каналов уже пуст[/yellow]")
+            input("Нажмите Enter для продолжения...")
+            return
+        
+        if Confirm.ask(f"Очистить список из {len(self.channels)} каналов?"):
+            self.channels = []
+            self.console.print("[green]✅ Список каналов очищен[/green]")
+        else:
+            self.console.print("[yellow]Операция отменена[/yellow]")
+        
+        input("\nНажмите Enter для продолжения...")
+    
+    async def change_channels_file_path(self):
+        """Изменить путь к файлу каналов"""
+        self.console.clear()
+        
+        current_path = self.config_manager.get_channels_file_path()
+        
+        new_path = Prompt.ask(
+            "Введите новый путь к файлу каналов",
+            default=current_path
+        )
+        
+        if new_path != current_path:
+            self.config_manager.config.storage.channels_path = new_path
+            self.console.print(f"[green]✅ Путь к файлу каналов изменен: {new_path}[/green]")
+            
+            if Confirm.ask("Сохранить изменения в конфигурации?"):
+                self.config_manager.save_config()
+                self.console.print("[green]✅ Конфигурация сохранена[/green]")
+        else:
+            self.console.print("[yellow]Путь не изменился[/yellow]")
+        
+        input("\nНажмите Enter для продолжения...")
 
 
 async def main():

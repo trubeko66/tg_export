@@ -28,8 +28,9 @@ class TelegramConfig:
 @dataclass
 class BotConfig:
     """Конфигурация бота для уведомлений"""
-    bot_token: Optional[str] = None
+    token: Optional[str] = None  # Изменено с bot_token на token
     chat_id: Optional[str] = None
+    notifications: bool = True  # Добавлено поле notifications
     enabled: bool = False
 
 
@@ -137,7 +138,7 @@ class ConfigManager:
     def is_bot_configured(self) -> bool:
         """Проверка настройки бота"""
         return (self.config.bot.enabled and 
-                self.config.bot.bot_token and 
+                self.config.bot.token and 
                 self.config.bot.chat_id)
     
     def setup_telegram_config(self, force_setup: bool = False):
@@ -193,12 +194,12 @@ class ConfigManager:
         ))
         
         # Ввод данных
-        bot_token = Prompt.ask("Bot Token", password=True, default=self.config.bot.bot_token or "")
+        bot_token = Prompt.ask("Bot Token", password=True, default=self.config.bot.token or "")
         chat_id = Prompt.ask("Chat ID для уведомлений", default=self.config.bot.chat_id or "")
         
         # Проверка работы бота
         if self._test_bot(bot_token, chat_id):
-            self.config.bot.bot_token = bot_token
+            self.config.bot.token = bot_token
             self.config.bot.chat_id = chat_id
             self.config.bot.enabled = True
             
@@ -207,7 +208,7 @@ class ConfigManager:
         else:
             self.console.print("[red]✗ Не удалось настроить бота[/red]")
             if Confirm.ask("Сохранить настройки бота несмотря на ошибку?"):
-                self.config.bot.bot_token = bot_token
+                self.config.bot.token = bot_token
                 self.config.bot.chat_id = chat_id
                 self.config.bot.enabled = True
                 self.save_config()
@@ -285,8 +286,8 @@ class ConfigManager:
         if self.config.bot.enabled:
             table.add_row(
                 "Bot Token", 
-                "***скрыто***" if self.config.bot.bot_token else "Не задано",
-                "✓ Настроено" if self.config.bot.bot_token else "✗ Не настроено"
+                "***скрыто***" if self.config.bot.token else "Не задано",
+                "✓ Настроено" if self.config.bot.token else "✗ Не настроено"
             )
             
             table.add_row(
@@ -494,3 +495,71 @@ class ConfigManager:
     def get_bot_config(self) -> BotConfig:
         """Получение конфигурации бота"""
         return self.config.bot
+    
+    def export_channels(self, channels: list, file_path: Optional[str] = None) -> bool:
+        """Экспорт списка каналов в файл"""
+        try:
+            if file_path is None:
+                file_path = self.config.storage.channels_path or ".channels"
+            
+            channels_data = []
+            for channel in channels:
+                if hasattr(channel, 'title') and hasattr(channel, 'username'):
+                    channels_data.append({
+                        'title': channel.title,
+                        'username': channel.username,
+                        'id': getattr(channel, 'id', None),
+                        'description': getattr(channel, 'description', ''),
+                        'subscribers_count': getattr(channel, 'subscribers_count', 0)
+                    })
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(channels_data, f, ensure_ascii=False, indent=2)
+            
+            self.console.print(f"[green]✅ Каналы экспортированы в {file_path}[/green]")
+            return True
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка экспорта каналов: {e}[/red]")
+            return False
+    
+    def import_channels(self, file_path: Optional[str] = None) -> list:
+        """Импорт списка каналов из файла"""
+        try:
+            if file_path is None:
+                file_path = self.config.storage.channels_path or ".channels"
+            
+            if not Path(file_path).exists():
+                self.console.print(f"[yellow]⚠️ Файл {file_path} не найден[/yellow]")
+                return []
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                channels_data = json.load(f)
+            
+            # Создаем объекты ChannelInfo из данных
+            from telegram_exporter import ChannelInfo
+            channels = []
+            for data in channels_data:
+                channel = ChannelInfo(
+                    title=data.get('title', ''),
+                    username=data.get('username', ''),
+                    id=data.get('id'),
+                    description=data.get('description', ''),
+                    subscribers_count=data.get('subscribers_count', 0)
+                )
+                channels.append(channel)
+            
+            self.console.print(f"[green]✅ Импортировано {len(channels)} каналов из {file_path}[/green]")
+            return channels
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка импорта каналов: {e}[/red]")
+            return []
+    
+    def get_channels_file_path(self) -> str:
+        """Получить путь к файлу каналов"""
+        return self.config.storage.channels_path or ".channels"
+    
+    def channels_file_exists(self) -> bool:
+        """Проверить существование файла каналов"""
+        return Path(self.get_channels_file_path()).exists()
