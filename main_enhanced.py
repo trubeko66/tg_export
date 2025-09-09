@@ -31,6 +31,25 @@ class EnhancedTelegramExporter(TelegramExporter):
         self.dashboard = ChannelDashboard(self.console)
         self.enhanced_cli = EnhancedCLI(self.console)
     
+    async def initialize(self):
+        """Инициализация улучшенного экспортера"""
+        try:
+            # Инициализируем базовый экспортер
+            await self.initialize_client()
+            
+            # Дополнительная инициализация для улучшенной версии
+            self.console.print("[green]Инициализация улучшенных модулей...[/green]")
+            
+            # Загружаем каналы если они есть
+            if not self.channels:
+                self.console.print("[yellow]Каналы не загружены. Используйте обычную версию для настройки.[/yellow]")
+            
+            self.console.print("[green]✅ Инициализация завершена[/green]")
+            
+        except Exception as e:
+            self.console.print(f"[red]Ошибка инициализации: {e}[/red]")
+            raise
+    
     async def show_enhanced_menu(self):
         """Показать улучшенное меню"""
         while True:
