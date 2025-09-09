@@ -6,6 +6,7 @@
 
 import asyncio
 import sys
+import time
 from pathlib import Path
 from typing import List, Any, Optional
 
@@ -142,7 +143,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         self.console.clear()
         
         with self.console.status("Анализ данных..."):
-            await asyncio.sleep(1)  # Симуляция анализа
+            time.sleep(1)  # Симуляция анализа
         
         # Получаем данные для аналитики
         channels_data = []
@@ -195,7 +196,7 @@ class EnhancedTelegramExporter(TelegramExporter):
             selected_channel = self.channels[choice - 1]
             
             with self.console.status(f"Анализ канала '{selected_channel.title}'..."):
-                await asyncio.sleep(2)
+                time.sleep(2)
             
             # Генерируем отчет по каналу
             export_base_dir = Path(self.config.storage.export_base_dir)
@@ -217,7 +218,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         self.console.clear()
         
         with self.console.status("Подготовка сравнения..."):
-            await asyncio.sleep(1)
+            time.sleep(1)
         
         # Получаем данные для сравнения
         channels_data = []
@@ -244,7 +245,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         self.console.clear()
         
         with self.console.status("Генерация JSON отчета..."):
-            await asyncio.sleep(2)
+            time.sleep(2)
         
         # Получаем данные для экспорта
         channels_data = []
@@ -271,7 +272,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         self.console.clear()
         
         with self.console.status("Генерация CSV отчета..."):
-            await asyncio.sleep(2)
+            time.sleep(2)
         
         # Получаем данные для экспорта
         channels_data = []
@@ -298,7 +299,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         self.console.clear()
         
         with self.console.status("Загрузка карты каналов..."):
-            await asyncio.sleep(1)
+            time.sleep(1)
         
         # Обновляем статус каналов
         export_base_dir = Path(self.config.storage.export_base_dir)

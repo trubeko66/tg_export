@@ -188,7 +188,7 @@ class EnhancedCLI:
         
         with Status("Загрузка аналитики...", spinner="dots"):
             # Здесь должна быть реальная загрузка данных
-            await asyncio.sleep(1)  # Симуляция загрузки
+            time.sleep(1)  # Симуляция загрузки
         
         # Создаем панель с общей статистикой
         stats_panel = Panel(
@@ -260,7 +260,7 @@ class EnhancedCLI:
             
             # Показываем анализ выбранного канала
             with Status(f"Анализ канала '{selected_channel}'...", spinner="dots"):
-                await asyncio.sleep(2)  # Симуляция анализа
+                time.sleep(2)  # Симуляция анализа
             
             # Создаем детальный отчет
             analysis_panel = Panel(
@@ -296,7 +296,7 @@ class EnhancedCLI:
         self.console.clear()
         
         with Status("Подготовка сравнительного анализа...", spinner="dots"):
-            await asyncio.sleep(1)
+            time.sleep(1)
         
         # Создаем сравнительную таблицу
         comparison_table = Table(title="Сравнение каналов", box=box.ROUNDED)
@@ -323,7 +323,7 @@ class EnhancedCLI:
         self.console.clear()
         
         with Status("Анализ временных паттернов...", spinner="dots"):
-            await asyncio.sleep(1)
+            time.sleep(1)
         
         # Создаем панель с временной аналитикой
         temporal_panel = Panel(
@@ -360,7 +360,7 @@ class EnhancedCLI:
         self.console.clear()
         
         with Status("Загрузка карты каналов...", spinner="dots"):
-            await asyncio.sleep(1)
+            time.sleep(1)
         
         # Создаем интерактивную карту каналов
         dashboard_panel = Panel(
@@ -424,7 +424,7 @@ class EnhancedCLI:
         self.console.clear()
         
         with Status("Генерация JSON отчета...", spinner="dots"):
-            await asyncio.sleep(2)
+            time.sleep(2)
         
         self.console.print("[green]✅ JSON отчет успешно создан: analytics_report.json[/green]")
         input("\nНажмите Enter для продолжения...")
@@ -435,7 +435,7 @@ class EnhancedCLI:
         self.console.clear()
         
         with Status("Генерация CSV отчета...", spinner="dots"):
-            await asyncio.sleep(2)
+            time.sleep(2)
         
         self.console.print("[green]✅ CSV отчет успешно создан: analytics_report.csv[/green]")
         input("\nНажмите Enter для продолжения...")
@@ -446,7 +446,7 @@ class EnhancedCLI:
         self.console.clear()
         
         with Status("Генерация HTML отчета...", spinner="dots"):
-            await asyncio.sleep(3)
+            time.sleep(3)
         
         self.console.print("[green]✅ HTML отчет успешно создан: analytics_report.html[/green]")
         input("\nНажмите Enter для продолжения...")
@@ -457,7 +457,7 @@ class EnhancedCLI:
         self.console.clear()
         
         with Status("Генерация детального отчета...", spinner="dots"):
-            await asyncio.sleep(4)
+            time.sleep(4)
         
         self.console.print("[green]✅ Детальный отчет успешно создан: detailed_report.html[/green]")
         input("\nНажмите Enter для продолжения...")
