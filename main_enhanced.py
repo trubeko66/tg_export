@@ -26,6 +26,7 @@ from analytics import AnalyticsReporter
 from channel_dashboard import ChannelDashboard
 from html_reporter import HTMLReporter
 from simple_cli import SimpleCLI
+from settings_methods import SettingsMethods
 
 
 class EnhancedTelegramExporter(TelegramExporter):
@@ -37,6 +38,8 @@ class EnhancedTelegramExporter(TelegramExporter):
         self.dashboard = ChannelDashboard(self.console)
         self.html_reporter = HTMLReporter()
         self.simple_cli = SimpleCLI(self.console)
+        self.config_manager = ConfigManager()
+        self.settings_methods = SettingsMethods(self.console, self.config_manager)
     
     async def initialize(self):
         """Инициализация улучшенного экспортера"""
@@ -220,7 +223,7 @@ class EnhancedTelegramExporter(TelegramExporter):
                 time.sleep(2)
             
             # Генерируем отчет по каналу
-            export_base_dir = Path(self.config.storage.export_base_dir)
+            export_base_dir = Path(self.config_manager.config.storage.export_base_dir)
             channel_dir = export_base_dir / self._sanitize_filename(selected_channel.title)
             
             if channel_dir.exists():
@@ -326,7 +329,7 @@ class EnhancedTelegramExporter(TelegramExporter):
             time.sleep(1)
         
         # Обновляем статус каналов
-        export_base_dir = Path(self.config.storage.export_base_dir)
+        export_base_dir = Path(self.config_manager.config.storage.export_base_dir)
         self.dashboard.update_channels_status(self.channels, self.stats, export_base_dir)
         
         # Показываем статический дашборд
@@ -472,35 +475,72 @@ class EnhancedTelegramExporter(TelegramExporter):
     
     async def show_settings_menu(self):
         """Показать меню настроек"""
-        self.console.clear()
-        
-        settings_panel = Panel(
-            "⚙️ Настройки\n\n"
-            "1. 🔧 Управление конфигурацией\n"
-            "2. 📱 Настройки Telegram API\n"
-            "3. 🤖 Настройки бота\n"
-            "4. ☁️ Настройки WebDAV\n"
-            "5. 🗂️ Настройки хранения\n"
-            "0. 🔙 Назад",
-            title="⚙️ Настройки",
-            border_style="yellow"
-        )
-        
-        self.console.print(settings_panel)
-        
-        choice = Prompt.ask(
-            "Выберите раздел настроек",
-            choices=["1", "2", "3", "4", "5", "0"]
-        )
-        
-        if choice == "0":
-            return
-        
-        # Показываем информацию о настройках
-        self.console.print("[yellow]Раздел настроек в разработке[/yellow]")
-        self.console.print("Используйте обычную версию программы для настройки конфигурации.")
-        
-        input("Нажмите Enter для продолжения...")
+        while True:
+            self.console.clear()
+            
+            # Показываем текущие настройки
+            config = self.config_manager.config
+            
+            current_settings_panel = Panel(
+                f"📋 Текущие настройки\n\n"
+                f"• Telegram API ID: {config.telegram.api_id or 'Не настроен'}\n"
+                f"• Telegram API Hash: {'*' * 8 if config.telegram.api_hash else 'Не настроен'}\n"
+                f"• Bot Token: {'*' * 8 if config.bot.token else 'Не настроен'}\n"
+                f"• Chat ID: {config.bot.chat_id or 'Не настроен'}\n"
+                f"• WebDAV URL: {config.webdav.url or 'Не настроен'}\n"
+                f"• Export Directory: {config.storage.export_base_dir}\n"
+                f"• First Run: {config.first_run}",
+                title="⚙️ Текущие настройки",
+                border_style="blue"
+            )
+            
+            settings_panel = Panel(
+                "⚙️ Управление настройками\n\n"
+                "1. 🔧 Управление конфигурацией\n"
+                "2. 📱 Настройки Telegram API\n"
+                "3. 🤖 Настройки бота\n"
+                "4. ☁️ Настройки WebDAV\n"
+                "5. 🗂️ Настройки хранения\n"
+                "6. 🔄 Сбросить настройки\n"
+                "7. 💾 Сохранить настройки\n"
+                "8. 🧪 Тест настроек\n"
+                "0. 🔙 Назад",
+                title="⚙️ Меню настроек",
+                border_style="yellow"
+            )
+            
+            self.console.print(current_settings_panel)
+            self.console.print(settings_panel)
+            
+            choice = Prompt.ask(
+                "Выберите раздел настроек",
+                choices=["1", "2", "3", "4", "5", "6", "7", "8", "0"]
+            )
+            
+            if choice == "0":
+                break
+            
+            try:
+                if choice == "1":
+                    await self.settings_methods.show_config_management()
+                elif choice == "2":
+                    await self.settings_methods.show_telegram_settings()
+                elif choice == "3":
+                    await self.settings_methods.show_bot_settings()
+                elif choice == "4":
+                    await self.settings_methods.show_webdav_settings()
+                elif choice == "5":
+                    await self.settings_methods.show_storage_settings()
+                elif choice == "6":
+                    await self.settings_methods.reset_settings()
+                elif choice == "7":
+                    await self.settings_methods.save_settings()
+                elif choice == "8":
+                    await self.settings_methods.test_settings()
+                    
+            except Exception as e:
+                self.console.print(f"[red]Ошибка настроек: {e}[/red]")
+                input("Нажмите Enter для продолжения...")
     
     async def show_logs_menu(self):
         """Показать меню логов"""
@@ -541,7 +581,7 @@ class EnhancedTelegramExporter(TelegramExporter):
     def _get_channels_data(self) -> List[Tuple[Path, str]]:
         """Получить данные каналов для аналитики"""
         channels_data = []
-        export_base_dir = Path(self.config.storage.export_base_dir)
+        export_base_dir = Path(self.config_manager.config.storage.export_base_dir)
         
         for channel in self.channels:
             channel_dir = export_base_dir / self._sanitize_filename(channel.title)
