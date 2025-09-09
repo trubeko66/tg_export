@@ -87,6 +87,7 @@ class SettingsMethods:
             f"3. ✏️ Изменить номер телефона\n"
             f"4. 🔄 Сбросить настройки Telegram\n"
             f"5. 🔐 Принудительная повторная авторизация\n"
+            f"6. 🗑️ Очистить заблокированные сессии\n"
             f"0. 🔙 Назад",
             title="📱 Настройки Telegram API",
             border_style="green"
@@ -96,7 +97,7 @@ class SettingsMethods:
         
         choice = Prompt.ask(
             "Выберите действие",
-            choices=["1", "2", "3", "4", "5", "0"]
+            choices=["1", "2", "3", "4", "5", "6", "0"]
         )
         
         if choice == "0":
@@ -130,6 +131,9 @@ class SettingsMethods:
             
             elif choice == "5":
                 await self.force_telegram_reauth()
+            
+            elif choice == "6":
+                await self.clear_locked_sessions()
                 
         except Exception as e:
             self.console.print(f"[red]Ошибка: {e}[/red]")
@@ -178,6 +182,69 @@ class SettingsMethods:
                 
             except Exception as e:
                 self.console.print(f"[red]❌ Ошибка очистки сессии: {e}[/red]")
+        else:
+            self.console.print("[blue]Операция отменена[/blue]")
+    
+    async def clear_locked_sessions(self):
+        """Очистка заблокированных сессий"""
+        self.console.clear()
+        
+        info_panel = Panel(
+            "🗑️ Очистка заблокированных сессий\n\n"
+            "Эта функция:\n"
+            "• Найдет все файлы сессий Telegram\n"
+            "• Проверит, какие из них заблокированы\n"
+            "• Удалит заблокированные файлы\n"
+            "• Очистит временные файлы\n\n"
+            "⚠️ Внимание: Это может потребовать повторной авторизации!",
+            title="🗑️ Очистка сессий",
+            border_style="yellow"
+        )
+        
+        self.console.print(info_panel)
+        
+        if Confirm.ask("Вы уверены, что хотите очистить заблокированные сессии?"):
+            try:
+                from pathlib import Path
+                import glob
+                
+                # Ищем все файлы сессий
+                session_files = glob.glob("session_*.session")
+                session_files.extend(glob.glob("session_*.session-journal"))
+                session_files.extend(glob.glob("session_*.session-wal"))
+                
+                if not session_files:
+                    self.console.print("[blue]📁 Файлы сессий не найдены[/blue]")
+                    return
+                
+                self.console.print(f"[blue]🔍 Найдено {len(session_files)} файлов сессий[/blue]")
+                
+                cleared_count = 0
+                for session_file in session_files:
+                    try:
+                        # Пытаемся открыть файл для проверки блокировки
+                        with open(session_file, 'r+b') as f:
+                            pass
+                        self.console.print(f"[green]✅ {session_file} - доступен[/green]")
+                    except (PermissionError, OSError) as e:
+                        if "database is locked" in str(e) or "Permission denied" in str(e):
+                            try:
+                                Path(session_file).unlink()
+                                self.console.print(f"[yellow]🗑️ {session_file} - удален (был заблокирован)[/yellow]")
+                                cleared_count += 1
+                            except Exception as delete_error:
+                                self.console.print(f"[red]❌ {session_file} - не удалось удалить: {delete_error}[/red]")
+                        else:
+                            self.console.print(f"[red]❌ {session_file} - ошибка: {e}[/red]")
+                
+                if cleared_count > 0:
+                    self.console.print(f"[green]✅ Очищено {cleared_count} заблокированных файлов[/green]")
+                    self.console.print("[yellow]⚠️ При следующем запуске может потребоваться повторная авторизация[/yellow]")
+                else:
+                    self.console.print("[blue]ℹ️ Заблокированных файлов не найдено[/blue]")
+                
+            except Exception as e:
+                self.console.print(f"[red]❌ Ошибка очистки сессий: {e}[/red]")
         else:
             self.console.print("[blue]Операция отменена[/blue]")
     

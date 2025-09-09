@@ -453,13 +453,34 @@ class TelegramExporter:
                 await self._clear_session(session_name)
                 self.console.print("[yellow]⚠️ Старая сессия очищена, требуется повторная авторизация[/yellow]")
             
+            # Проверяем, не заблокирован ли файл сессии
+            actual_session_name = await self._check_and_unlock_session(session_name)
+            if actual_session_name:
+                session_name = actual_session_name
+            
             self.client = TelegramClient(session_name, api_id, api_hash)
             
             # Запускаем клиент с принудительной авторизацией если требуется
-            if force_reauth:
-                await self.client.start(phone=phone, force_sms=True)
-            else:
-                await self.client.start(phone=phone, force_sms=False)
+            try:
+                if force_reauth:
+                    await self.client.start(phone=phone, force_sms=True)
+                else:
+                    await self.client.start(phone=phone, force_sms=False)
+            except Exception as start_error:
+                if "database is locked" in str(start_error):
+                    self.console.print("[yellow]⚠️ База данных заблокирована, пытаемся разблокировать...[/yellow]")
+                    # Пытаемся разблокировать и перезапустить
+                    await asyncio.sleep(3)
+                    try:
+                        if force_reauth:
+                            await self.client.start(phone=phone, force_sms=True)
+                        else:
+                            await self.client.start(phone=phone, force_sms=False)
+                    except Exception as retry_error:
+                        self.console.print(f"[red]❌ Не удалось разблокировать базу данных: {retry_error}[/red]")
+                        return False
+                else:
+                    raise
             
             if await self.client.is_user_authorized():
                 self.console.print("[green]✓ Успешная авторизация в Telegram[/green]")
@@ -483,6 +504,46 @@ class TelegramExporter:
                 self.console.print(f"[blue]🗑️ Удален файл сессии: {session_file}[/blue]")
         except Exception as e:
             self.console.print(f"[yellow]⚠️ Не удалось удалить сессию: {e}[/yellow]")
+    
+    async def _check_and_unlock_session(self, session_name: str):
+        """Проверка и разблокировка файла сессии"""
+        try:
+            session_file = Path(f"{session_name}.session")
+            if not session_file.exists():
+                return
+            
+            # Проверяем, не заблокирован ли файл
+            try:
+                # Пытаемся открыть файл для записи
+                with open(session_file, 'r+b') as f:
+                    pass
+                self.console.print(f"[green]✅ Файл сессии доступен: {session_file}[/green]")
+            except (PermissionError, OSError) as e:
+                if "database is locked" in str(e) or "Permission denied" in str(e):
+                    self.console.print(f"[yellow]⚠️ Файл сессии заблокирован: {session_file}[/yellow]")
+                    self.console.print("[blue]🔄 Попытка разблокировки...[/blue]")
+                    
+                    # Ждем немного и пытаемся снова
+                    await asyncio.sleep(2)
+                    
+                    try:
+                        # Пытаемся удалить заблокированный файл
+                        session_file.unlink()
+                        self.console.print(f"[green]✅ Заблокированный файл сессии удален: {session_file}[/green]")
+                    except Exception as delete_error:
+                        self.console.print(f"[red]❌ Не удалось удалить заблокированный файл: {delete_error}[/red]")
+                        # Создаем новый файл с уникальным именем
+                        import time
+                        timestamp = int(time.time())
+                        new_session_name = f"{session_name}_{timestamp}"
+                        self.console.print(f"[blue]🔄 Используем новое имя сессии: {new_session_name}[/blue]")
+                        return new_session_name
+                else:
+                    raise
+                    
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️ Ошибка проверки сессии: {e}[/yellow]")
+            return session_name
     
     def setup_bot_notifications(self):
         """Настройка уведомлений через бота (теперь через конфигурацию)"""
