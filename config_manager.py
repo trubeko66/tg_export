@@ -573,3 +573,30 @@ class ConfigManager:
     def channels_file_exists(self) -> bool:
         """Проверить существование файла каналов"""
         return Path(self.get_channels_file_path()).exists()
+    
+    def add_channel_to_file(self, channel_info: dict):
+        """Добавить канал в файл .channels"""
+        try:
+            channels_file = Path(self.get_channels_file_path())
+            
+            # Загружаем существующие каналы
+            existing_channels = []
+            if channels_file.exists():
+                with open(channels_file, 'r', encoding='utf-8') as f:
+                    existing_channels = json.load(f)
+            
+            # Проверяем, не существует ли уже канал с таким ID
+            channel_id = channel_info['id']
+            for existing_channel in existing_channels:
+                if existing_channel.get('id') == channel_id:
+                    raise ValueError(f"Канал с ID {channel_id} уже существует в файле")
+            
+            # Добавляем новый канал
+            existing_channels.append(channel_info)
+            
+            # Сохраняем обновленный список
+            with open(channels_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_channels, f, ensure_ascii=False, indent=2)
+            
+        except Exception as e:
+            raise Exception(f"Ошибка добавления канала в файл: {e}")

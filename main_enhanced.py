@@ -1706,6 +1706,7 @@ class EnhancedTelegramExporter(TelegramExporter):
             "2. ⚙️ Настройки интервала проверки\n"
             "3. 📊 Показать статистику каналов\n"
             "4. 🧪 Тест уведомлений в Telegram\n"
+            "5. ➕ Добавить канал в мониторинг\n"
             "0. 🔙 Назад",
             title="🔄 Меню постоянного экспорта",
             border_style="green"
@@ -1716,7 +1717,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         
         choice = Prompt.ask(
             "Выберите действие",
-            choices=["1", "2", "3", "4", "0"]
+            choices=["1", "2", "3", "4", "5", "0"]
         )
         
         if choice == "0":
@@ -1731,6 +1732,8 @@ class EnhancedTelegramExporter(TelegramExporter):
                 await self.show_channels_statistics()
             elif choice == "4":
                 await self.test_telegram_notifications()
+            elif choice == "5":
+                await self.add_channel_to_monitoring()
                 
         except Exception as e:
             self.console.print(f"[red]Ошибка: {e}[/red]")
@@ -2061,6 +2064,139 @@ class EnhancedTelegramExporter(TelegramExporter):
         
         input("\nНажмите Enter для продолжения...")
     
+    async def add_channel_to_monitoring(self):
+        """Добавление канала в мониторинг"""
+        self.console.clear()
+        
+        info_panel = Panel(
+            "➕ Добавление канала в мониторинг\n\n"
+            "Вы можете добавить канал несколькими способами:\n"
+            "• По username (@channel_name)\n"
+            "• По ссылке (https://t.me/channel_name)\n"
+            "• По ID канала\n\n"
+            "Канал будет добавлен в файл .channels и начнет мониториться.",
+            title="ℹ️ Информация",
+            border_style="blue"
+        )
+        
+        self.console.print(info_panel)
+        
+        # Запрашиваем информацию о канале
+        channel_input = Prompt.ask("Введите username, ссылку или ID канала")
+        
+        if not channel_input.strip():
+            self.console.print("[red]❌ Пустой ввод[/red]")
+            input("Нажмите Enter для продолжения...")
+            return
+        
+        try:
+            # Парсим ввод пользователя
+            channel_id = None
+            username = None
+            
+            # Проверяем разные форматы
+            if channel_input.startswith('@'):
+                username = channel_input[1:]  # Убираем @
+            elif channel_input.startswith('https://t.me/'):
+                username = channel_input.replace('https://t.me/', '')
+            elif channel_input.startswith('t.me/'):
+                username = channel_input.replace('t.me/', '')
+            elif channel_input.isdigit():
+                channel_id = int(channel_input)
+            else:
+                # Предполагаем, что это username без @
+                username = channel_input
+            
+            # Пытаемся получить информацию о канале
+            self.console.print("[blue]🔄 Получение информации о канале...[/blue]")
+            
+            # Создаем временный экспортер для получения информации о канале
+            from telegram_exporter import TelegramExporter
+            
+            temp_exporter = TelegramExporter()
+            await temp_exporter.initialize_client(force_reauth=False)
+            
+            try:
+                if channel_id:
+                    entity = await temp_exporter.client.get_entity(channel_id)
+                else:
+                    entity = await temp_exporter.client.get_entity(username)
+                
+                # Получаем информацию о канале
+                channel_info = {
+                    'id': entity.id,
+                    'title': entity.title,
+                    'username': getattr(entity, 'username', ''),
+                    'description': getattr(entity, 'about', ''),
+                    'subscribers_count': getattr(entity, 'participants_count', 0),
+                    'last_message_id': 0,  # Начинаем с 0
+                    'last_check': datetime.now().isoformat(),
+                    'total_messages': 0,
+                    'media_size_mb': 0.0
+                }
+                
+                # Показываем информацию о канале
+                channel_panel = Panel(
+                    f"📺 <b>Название:</b> {channel_info['title']}\n"
+                    f"🔗 <b>Username:</b> @{channel_info['username'] if channel_info['username'] else 'Не указан'}\n"
+                    f"🆔 <b>ID:</b> {channel_info['id']}\n"
+                    f"👥 <b>Подписчиков:</b> {channel_info['subscribers_count']:,}\n"
+                    f"📝 <b>Описание:</b> {channel_info['description'][:100] if channel_info['description'] else 'Не указано'}...",
+                    title="📋 Информация о канале",
+                    border_style="green"
+                )
+                
+                self.console.print(channel_panel)
+                
+                # Подтверждение добавления
+                if Confirm.ask("Добавить этот канал в мониторинг?"):
+                    # Добавляем канал в файл .channels
+                    self.config_manager.add_channel_to_file(channel_info)
+                    
+                    # Обновляем список каналов
+                    self.channels = self.config_manager.import_channels()
+                    
+                    self.console.print(f"[green]✅ Канал '{channel_info['title']}' добавлен в мониторинг[/green]")
+                    
+                    # Отправляем уведомление о новом канале
+                    if self.config_manager.is_bot_configured():
+                        from telegram_notifications import TelegramNotifier
+                        notifier = TelegramNotifier(self.console)
+                        
+                        # Создаем объект ChannelInfo для уведомления
+                        from telegram_exporter import ChannelInfo
+                        channel_obj = ChannelInfo(
+                            id=channel_info['id'],
+                            title=channel_info['title'],
+                            username=channel_info['username'],
+                            description=channel_info['description'],
+                            subscribers_count=channel_info['subscribers_count'],
+                            last_message_id=channel_info['last_message_id'],
+                            last_check=channel_info['last_check'],
+                            total_messages=channel_info['total_messages'],
+                            media_size_mb=channel_info['media_size_mb']
+                        )
+                        
+                        await notifier.send_new_channel_notification(channel_obj)
+                        self.console.print("[green]✅ Уведомление о новом канале отправлено[/green]")
+                    
+                else:
+                    self.console.print("[yellow]Добавление канала отменено[/yellow]")
+                
+            except Exception as e:
+                self.console.print(f"[red]❌ Ошибка получения информации о канале: {e}[/red]")
+                self.console.print("Проверьте правильность ввода и подключение к интернету")
+            
+            finally:
+                # Отключаем временный клиент
+                if hasattr(temp_exporter, 'disconnect'):
+                    await temp_exporter.disconnect()
+                
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка добавления канала: {e}[/red]")
+        
+        input("\nНажмите Enter для продолжения...")
+
 async def main():
     """Главная функция"""
     console = Console()

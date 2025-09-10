@@ -53,6 +53,7 @@ class ContinuousExporter:
         self.channel_filtered_messages = {}  # Словарь для отслеживания отфильтрованных сообщений по каналам
         self.channel_useful_messages = {}  # Словарь для отслеживания полезных сообщений по каналам
         self.check_interval = 30  # Интервал проверки в секундах (по умолчанию 30)
+        self.channels_state_file = Path("channels_state.json")  # Файл для сохранения состояния каналов
         
         # Настройка обработчика сигналов для корректного завершения
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -62,6 +63,8 @@ class ContinuousExporter:
         """Обработчик сигналов для корректного завершения"""
         self.console.print("\n[yellow]Получен сигнал завершения...[/yellow]")
         self.should_stop = True
+        # Сохраняем состояние каналов при выходе
+        self._save_channels_state()
     
     async def initialize(self):
         """Инициализация экспортера"""
@@ -70,6 +73,9 @@ class ContinuousExporter:
             if self.config_manager.channels_file_exists():
                 self.channels = self.config_manager.import_channels()
                 self.console.print(f"[green]✅ Загружено {len(self.channels)} каналов[/green]")
+                
+                # Загружаем состояние каналов (last_message_id и т.д.)
+                self._load_channels_state()
             else:
                 self.console.print("[yellow]⚠️ Файл каналов не найден[/yellow]")
                 return False
@@ -679,6 +685,9 @@ class ContinuousExporter:
                 # Небольшая пауза между каналами
                 await asyncio.sleep(0.5)
             
+            # Сохраняем состояние каналов после проверки
+            self._save_channels_state()
+            
             # Показываем финальный статусный экран с результатами
             await self._show_final_check_status()
             
@@ -792,15 +801,13 @@ class ContinuousExporter:
                 filtered_messages = self.channel_filtered_messages.get(channel.id, 0)
                 total_messages = useful_messages + filtered_messages
                 
-                if total_messages > 0:
+                # Добавляем канал в сводку только если есть полезные сообщения
+                if useful_messages > 0:
                     channel_info = {
                         'channel': channel.title,
-                        'new_messages': total_messages
+                        'new_messages': total_messages,
+                        'useful_messages': useful_messages
                     }
-                    
-                    # Добавляем информацию о полезных сообщениях только если они есть
-                    if useful_messages > 0:
-                        channel_info['useful_messages'] = useful_messages
                     
                     # Добавляем информацию об отфильтрованных сообщениях только если они есть
                     if filtered_messages > 0:
@@ -829,6 +836,92 @@ class ContinuousExporter:
             
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка отправки сводки: {e}[/red]")
+    
+    def _save_channels_state(self):
+        """Сохранение состояния каналов в файл"""
+        try:
+            if not self.channels:
+                return
+            
+            state_data = {}
+            for channel in self.channels:
+                state_data[str(channel.id)] = {
+                    'last_message_id': channel.last_message_id,
+                    'last_check': channel.last_check,
+                    'title': channel.title,
+                    'username': getattr(channel, 'username', ''),
+                    'description': getattr(channel, 'description', ''),
+                    'subscribers_count': getattr(channel, 'subscribers_count', 0),
+                    'total_messages': getattr(channel, 'total_messages', 0),
+                    'media_size_mb': getattr(channel, 'media_size_mb', 0.0)
+                }
+            
+            import json
+            with open(self.channels_state_file, 'w', encoding='utf-8') as f:
+                json.dump(state_data, f, ensure_ascii=False, indent=2)
+            
+            self.console.print(f"[green]✅ Состояние {len(self.channels)} каналов сохранено[/green]")
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка сохранения состояния каналов: {e}[/red]")
+    
+    def _load_channels_state(self):
+        """Загрузка состояния каналов из файла"""
+        try:
+            if not self.channels_state_file.exists():
+                return
+            
+            import json
+            with open(self.channels_state_file, 'r', encoding='utf-8') as f:
+                state_data = json.load(f)
+            
+            # Обновляем состояние каналов
+            updated_count = 0
+            for channel in self.channels:
+                channel_id_str = str(channel.id)
+                if channel_id_str in state_data:
+                    state = state_data[channel_id_str]
+                    channel.last_message_id = state.get('last_message_id', channel.last_message_id)
+                    channel.last_check = state.get('last_check', channel.last_check)
+                    updated_count += 1
+            
+            if updated_count > 0:
+                self.console.print(f"[green]✅ Загружено состояние {updated_count} каналов[/green]")
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка загрузки состояния каналов: {e}[/red]")
+    
+    def _add_channel_to_state(self, channel: ChannelInfo):
+        """Добавление нового канала в состояние"""
+        try:
+            # Загружаем текущее состояние
+            state_data = {}
+            if self.channels_state_file.exists():
+                import json
+                with open(self.channels_state_file, 'r', encoding='utf-8') as f:
+                    state_data = json.load(f)
+            
+            # Добавляем новый канал
+            state_data[str(channel.id)] = {
+                'last_message_id': channel.last_message_id,
+                'last_check': channel.last_check,
+                'title': channel.title,
+                'username': getattr(channel, 'username', ''),
+                'description': getattr(channel, 'description', ''),
+                'subscribers_count': getattr(channel, 'subscribers_count', 0),
+                'total_messages': getattr(channel, 'total_messages', 0),
+                'media_size_mb': getattr(channel, 'media_size_mb', 0.0)
+            }
+            
+            # Сохраняем обновленное состояние
+            import json
+            with open(self.channels_state_file, 'w', encoding='utf-8') as f:
+                json.dump(state_data, f, ensure_ascii=False, indent=2)
+            
+            self.console.print(f"[green]✅ Канал {channel.title} добавлен в состояние[/green]")
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка добавления канала в состояние: {e}[/red]")
 
 
 async def main():
