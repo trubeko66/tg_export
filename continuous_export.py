@@ -818,11 +818,18 @@ class ContinuousExporter:
                     total_filtered_messages += filtered_messages
                     channels_with_messages += 1
             
+            # Проверяем, есть ли новые сообщения для отправки уведомления
+            total_new_messages = total_useful_messages + total_filtered_messages
+            
+            if total_new_messages == 0:
+                self.console.print("[blue]ℹ️ Новых сообщений не обнаружено, уведомление не отправляется[/blue]")
+                return
+            
             # Формируем данные сводки
             check_results = {
                 'total_channels': len(self.channels),
                 'checked_channels': len(self.channels),
-                'new_messages': total_useful_messages + total_filtered_messages,
+                'new_messages': total_new_messages,
                 'useful_messages': total_useful_messages,
                 'filtered_messages': total_filtered_messages,
                 'channels_with_messages': channels_with_messages,
@@ -831,7 +838,7 @@ class ContinuousExporter:
                 'check_interval': self.check_interval
             }
             
-            # Отправляем сводку
+            # Отправляем сводку только если есть новые сообщения
             await self.telegram_notifier.send_continuous_check_summary(check_results)
             
         except Exception as e:
