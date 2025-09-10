@@ -775,8 +775,19 @@ class ContinuousExporter:
         """Очистка ресурсов при завершении"""
         try:
             if self.telegram_connected and self.exporter and hasattr(self.exporter, 'disconnect'):
+                self.console.print("[blue]🔄 Отключение от Telegram...[/blue]")
+                
+                # Отключаем клиент
                 await self.exporter.disconnect()
+                
+                # Ждем немного, чтобы все фоновые задачи завершились
+                await asyncio.sleep(2)
+                
                 self.console.print("[green]✅ Telegram клиент отключен[/green]")
+            
+            # Останавливаем флаг работы
+            self.should_stop = True
+            
             self.console.print("[green]✅ Очистка ресурсов завершена[/green]")
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка очистки: {e}[/red]")

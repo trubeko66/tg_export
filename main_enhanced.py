@@ -47,6 +47,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         self.settings_methods = SettingsMethods(self.console, self.config_manager)
         self.telegram_notifier = TelegramNotifier(self.console)
         self.check_interval = 30  # Интервал проверки в секундах (по умолчанию 30)
+        self._current_export_index = -1  # Индекс текущего экспортируемого канала
     
     async def initialize(self):
         """Инициализация улучшенного экспортера"""
@@ -104,6 +105,9 @@ class EnhancedTelegramExporter(TelegramExporter):
             
             if choice in ["0", "q", "quit"]:
                 if Confirm.ask("Вы уверены, что хотите выйти?"):
+                    # Корректно завершаем работу
+                    self.console.print("[blue]🔄 Завершение работы...[/blue]")
+                    await self._cleanup_resources()
                     break
                 continue
             
@@ -620,6 +624,9 @@ class EnhancedTelegramExporter(TelegramExporter):
                 for i, channel in enumerate(selected_channels):
                     current_channel = f"Экспорт: {channel.title}"
                     
+                    # Сохраняем текущий индекс для статистики
+                    self._current_export_index = i
+                    
                     # Обновляем статус
                     live.update(self.create_export_status_display(
                         current_channel=current_channel,
@@ -995,7 +1002,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         return layout
     
     def _create_channels_export_table(self, channels: list, current_channel_index: int, progress: float) -> Table:
-        """Создает таблицу каналов для экспорта"""
+        """Создает таблицу каналов для экспорта с автоматической прокруткой"""
         table = Table(
             box=box.ROUNDED,
             show_header=True,
@@ -1010,7 +1017,44 @@ class EnhancedTelegramExporter(TelegramExporter):
         table.add_column("Сообщений", style="blue", justify="right", width=10)
         table.add_column("Статус", style="magenta", justify="center", width=12)
         
-        for i, channel in enumerate(channels):
+        # Определяем диапазон отображения для прокрутки
+        max_visible_rows = 15  # Максимальное количество видимых строк
+        total_channels = len(channels)
+        
+        if total_channels <= max_visible_rows:
+            # Если каналов мало, показываем все
+            start_index = 0
+            end_index = total_channels
+            show_scroll_info = False
+        else:
+            # Если каналов много, определяем видимый диапазон
+            if current_channel_index < 0:
+                # Если нет активного канала, показываем начало
+                start_index = 0
+                end_index = max_visible_rows
+            else:
+                # Центрируем активный канал в видимой области
+                half_visible = max_visible_rows // 2
+                start_index = max(0, current_channel_index - half_visible)
+                end_index = min(total_channels, start_index + max_visible_rows)
+                
+                # Корректируем начало, если достигли конца списка
+                if end_index - start_index < max_visible_rows:
+                    start_index = max(0, end_index - max_visible_rows)
+            
+            show_scroll_info = True
+        
+        # Добавляем информацию о прокрутке в заголовок
+        if show_scroll_info:
+            table.title = f"📋 Каналы для экспорта ({start_index + 1}-{end_index} из {total_channels})"
+        else:
+            table.title = f"📋 Каналы для экспорта ({total_channels})"
+        
+        # Отображаем каналы в видимом диапазоне
+        for i in range(start_index, end_index):
+            channel = channels[i]
+            display_index = i + 1  # Номер для отображения (начиная с 1)
+            
             # Определяем стиль строки
             if i == current_channel_index:
                 # Активный канал - выделяем
@@ -1043,13 +1087,33 @@ class EnhancedTelegramExporter(TelegramExporter):
             
             # Добавляем строку
             table.add_row(
-                str(i + 1),
+                str(display_index),
                 channel.title,
                 volume,
                 messages,
                 f"[{status_style}]{status}[/{status_style}]",
                 style=row_style
             )
+        
+        # Добавляем информацию о прокрутке, если нужно
+        if show_scroll_info and current_channel_index >= 0:
+            # Добавляем индикатор позиции активного канала
+            if current_channel_index < start_index:
+                # Активный канал выше видимой области
+                table.add_row(
+                    "↑", 
+                    f"[dim]Активный канал выше (позиция {current_channel_index + 1})[/dim]", 
+                    "", "", "", 
+                    style="dim"
+                )
+            elif current_channel_index >= end_index:
+                # Активный канал ниже видимой области
+                table.add_row(
+                    "↓", 
+                    f"[dim]Активный канал ниже (позиция {current_channel_index + 1})[/dim]", 
+                    "", "", "", 
+                    style="dim"
+                )
         
         return table
     
@@ -1078,6 +1142,11 @@ class EnhancedTelegramExporter(TelegramExporter):
         if current_channel:
             stats_text.append("⚡ Текущий канал\n\n", style="bold yellow")
             stats_text.append(f"{current_channel}\n", style="yellow")
+            
+            # Позиция в списке (если есть информация о текущем индексе)
+            if hasattr(self, '_current_export_index') and self._current_export_index >= 0:
+                current_pos = self._current_export_index + 1
+                stats_text.append(f"Позиция: {current_pos}/{total_channels}\n", style="cyan")
             
             # Прогресс текущего канала
             if progress > 0:
@@ -2314,10 +2383,48 @@ class EnhancedTelegramExporter(TelegramExporter):
         
         # Выводим все на экран
         self.console.print(layout)
+    
+    async def _cleanup_resources(self):
+        """Корректное завершение работы и очистка ресурсов"""
+        try:
+            # Останавливаем все фоновые задачи
+            if hasattr(self, 'client') and self.client:
+                self.console.print("[blue]🔄 Отключение от Telegram...[/blue]")
+                
+                # Отключаем клиент
+                await self.client.disconnect()
+                
+                # Ждем немного, чтобы все фоновые задачи завершились
+                await asyncio.sleep(1)
+                
+                self.console.print("[green]✅ Telegram клиент отключен[/green]")
+            
+            # Очищаем другие ресурсы если нужно
+            if hasattr(self, 'running'):
+                self.running = False
+                
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️ Ошибка при очистке ресурсов: {e}[/yellow]")
+
+# Глобальный флаг для корректного завершения
+should_exit = False
 
 async def main():
     """Главная функция"""
+    global should_exit
     console = Console()
+    exporter = None
+    
+    # Обработчик сигналов для корректного завершения
+    def signal_handler(signum, frame):
+        console.print(f"\n[yellow]Получен сигнал {signum}, завершение работы...[/yellow]")
+        # Устанавливаем флаг для корректного завершения
+        should_exit = True
+    
+    # Регистрируем обработчики сигналов
+    import signal
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
     try:
         # Создаем улучшенный экспортер
@@ -2356,6 +2463,15 @@ async def main():
     except Exception as e:
         console.print(f"[red]Критическая ошибка: {e}[/red]")
     finally:
+        # Правильно завершаем работу Telegram клиента
+        try:
+            if 'exporter' in locals() and exporter:
+                console.print("[blue]🔄 Завершение работы Telegram клиента...[/blue]")
+                await exporter._cleanup_resources()
+                console.print("[green]✅ Telegram клиент корректно отключен[/green]")
+        except Exception as cleanup_error:
+            console.print(f"[yellow]⚠️ Ошибка при завершении работы: {cleanup_error}[/yellow]")
+        
         console.print("[green]Программа завершена[/green]")
 
 
