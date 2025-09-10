@@ -18,9 +18,9 @@ from rich.prompt import Prompt, Confirm, IntPrompt
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 from rich.layout import Layout
-from rich.live import Live
 from rich.text import Text
 from rich import box
+from rich.live import Live
 
 # Импортируем основные модули
 from telegram_exporter import TelegramExporter, ChannelInfo
@@ -82,70 +82,20 @@ class EnhancedTelegramExporter(TelegramExporter):
         while True:
             self.console.clear()
             
-            # Показываем статус системы
-            total_messages = sum(channel.total_messages for channel in self.channels) if self.channels else 0
-            total_size = sum(channel.media_size_mb for channel in self.channels) if self.channels else 0.0
-            
-            status_panel = Panel(
-                f"📊 Статус системы\n\n"
-                f"• Каналов в списке: {len(self.channels) if self.channels else 0}\n"
-                f"• Всего сообщений: {total_messages:,}\n"
-                f"• Общий размер данных: {total_size:.1f} МБ\n"
-                f"• Последний экспорт: {self.stats.last_export_time or 'Никогда'}\n"
-                f"• Ошибок экспорта: {self.stats.export_errors}\n"
-                f"• Отфильтровано: {self.stats.filtered_messages:,}",
-                title="ℹ️ Информация",
-                border_style="blue"
+            # Создаем красивый заголовок
+            header_text = Text("🚀 Telegram Channel Exporter", style="bold blue")
+            header_text.append(" - Улучшенная версия", style="green")
+            header_panel = Panel(
+                header_text,
+                box=box.DOUBLE,
+                border_style="blue",
+                padding=(0, 1)
             )
+            self.console.print(header_panel)
             
-            # Показываем меню
-            menu_panel = Panel(
-                "🚀 Улучшенный Telegram Channel Exporter\n\n"
-                "1. 📊 Аналитика и отчеты\n"
-                "2. 🗺️ Интерактивная карта каналов\n"
-                "3. 🔄 Экспорт каналов\n"
-                "4. ⚙️ Настройки\n"
-                "5. 📋 Логи\n"
-                "6. 🎯 Улучшенный CLI интерфейс\n"
-                "7. 📁 Импорт/Экспорт каналов\n"
-                "8. 🔄 Постоянный экспорт каналов\n"
-                "0. 🚪 Выход",
-                title="📋 Главное меню",
-                border_style="green"
-            )
+            # Показываем улучшенный статус системы
+            await self._show_enhanced_status()
             
-            self.console.print(status_panel)
-            
-            # Показываем таблицу каналов если они есть
-            if self.channels and len(self.channels) > 0:
-                channels_table = Table(title=f"📋 Загруженные каналы ({len(self.channels)})", box=box.ROUNDED)
-                channels_table.add_column("№", style="cyan", width=3, justify="center")
-                channels_table.add_column("Название", style="green")
-                channels_table.add_column("Сообщений", style="yellow", justify="right", width=10)
-                channels_table.add_column("Размер (МБ)", style="magenta", justify="right", width=10)
-                channels_table.add_column("Последняя проверка", style="dim", width=15)
-                
-                for i, channel in enumerate(self.channels[:10], 1):  # Показываем первые 10 каналов
-                    messages = f"{channel.total_messages:,}" if channel.total_messages else "—"
-                    size = f"{channel.media_size_mb:.1f}" if channel.media_size_mb else "—"
-                    last_check = channel.last_check or "Никогда"
-                    if len(last_check) > 15:
-                        last_check = last_check[:12] + "..."
-                    
-                    channels_table.add_row(
-                        str(i),
-                        channel.title[:30] + "..." if len(channel.title) > 30 else channel.title,
-                        messages,
-                        size,
-                        last_check
-                    )
-                
-                if len(self.channels) > 10:
-                    channels_table.add_row("...", f"и еще {len(self.channels) - 10} каналов", "...", "...", "...")
-                
-                self.console.print(channels_table)
-            
-            self.console.print(menu_panel)
             
             choice = Prompt.ask(
                 "Выберите действие",
@@ -2196,6 +2146,174 @@ class EnhancedTelegramExporter(TelegramExporter):
             self.console.print(f"[red]❌ Ошибка добавления канала: {e}[/red]")
         
         input("\nНажмите Enter для продолжения...")
+    
+    async def _show_enhanced_status(self):
+        """Показать улучшенный статус системы"""
+        from rich.layout import Layout
+        from rich.align import Align
+        from rich.columns import Columns
+        from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn
+        from rich.live import Live
+        import time
+        
+        # Создаем layout для статуса
+        layout = Layout()
+        layout.split_column(
+            Layout(name="stats", size=8),
+            Layout(name="channels", size=12),
+            Layout(name="menu", size=8)
+        )
+        
+        # Подготавливаем данные
+        total_messages = sum(channel.total_messages for channel in self.channels) if self.channels else 0
+        total_size = sum(channel.media_size_mb for channel in self.channels) if self.channels else 0.0
+        channels_count = len(self.channels) if self.channels else 0
+        
+        # Статистика системы
+        stats_layout = Layout()
+        stats_layout.split_row(
+            Layout(name="left_stats", ratio=1),
+            Layout(name="right_stats", ratio=1)
+        )
+        
+        # Левая панель статистики
+        left_stats = Panel(
+            f"📊 [bold green]Основная статистика[/bold green]\n\n"
+            f"📺 [cyan]Каналов в списке:[/cyan] [bold]{channels_count}[/bold]\n"
+            f"💬 [yellow]Всего сообщений:[/yellow] [bold]{total_messages:,}[/bold]\n"
+            f"📁 [magenta]Общий размер:[/magenta] [bold]{total_size:.1f} МБ[/bold]\n"
+            f"🔄 [blue]Последний экспорт:[/blue] [bold]{self.stats.last_export_time or 'Никогда'}[/bold]",
+            title="📈 Статистика",
+            border_style="green",
+            box=box.ROUNDED
+        )
+        
+        # Правая панель статистики
+        right_stats = Panel(
+            f"⚙️ [bold green]Состояние системы[/bold green]\n\n"
+            f"❌ [red]Ошибок экспорта:[/red] [bold]{self.stats.export_errors}[/bold]\n"
+            f"🚫 [orange]Отфильтровано:[/orange] [bold]{self.stats.filtered_messages:,}[/bold]\n"
+            f"✅ [green]Успешно экспортировано:[/green] [bold]{self.stats.exported_messages:,}[/bold]\n"
+            f"🔗 [blue]Статус Telegram:[/blue] [bold]{'Подключен' if hasattr(self, 'client') and self.client else 'Не подключен'}[/bold]",
+            title="🔧 Система",
+            border_style="blue",
+            box=box.ROUNDED
+        )
+        
+        stats_layout["left_stats"].update(left_stats)
+        stats_layout["right_stats"].update(right_stats)
+        
+        # Таблица каналов с улучшениями
+        if self.channels and len(self.channels) > 0:
+            channels_table = Table(
+                title=f"📋 Загруженные каналы ({channels_count})", 
+                box=box.ROUNDED,
+                show_header=True,
+                header_style="bold magenta"
+            )
+            channels_table.add_column("№", style="cyan", width=3, justify="center")
+            channels_table.add_column("📺 Название", style="green", min_width=25)
+            channels_table.add_column("💬 Сообщений", style="yellow", justify="right", width=12)
+            channels_table.add_column("📁 Размер (МБ)", style="magenta", justify="right", width=12)
+            channels_table.add_column("🕒 Последняя проверка", style="dim", width=18)
+            channels_table.add_column("📊 Статус", style="blue", width=10, justify="center")
+            
+            # Показываем первые 8 каналов с улучшенным форматированием
+            for i, channel in enumerate(self.channels[:8], 1):
+                messages = f"{channel.total_messages:,}" if channel.total_messages else "—"
+                size = f"{channel.media_size_mb:.1f}" if channel.media_size_mb else "—"
+                last_check = channel.last_check or "Никогда"
+                
+                # Форматируем время последней проверки
+                if last_check != "Никогда" and len(last_check) > 16:
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(last_check.replace('Z', '+00:00'))
+                        last_check = dt.strftime("%d.%m %H:%M")
+                    except:
+                        last_check = last_check[:13] + "..."
+                
+                # Определяем статус канала
+                if channel.total_messages > 1000:
+                    status = "🟢 Активен"
+                elif channel.total_messages > 100:
+                    status = "🟡 Средний"
+                elif channel.total_messages > 0:
+                    status = "🟠 Малый"
+                else:
+                    status = "⚪ Пустой"
+                
+                # Обрезаем название канала
+                title = channel.title[:22] + "..." if len(channel.title) > 25 else channel.title
+                
+                channels_table.add_row(
+                    str(i),
+                    title,
+                    messages,
+                    size,
+                    last_check,
+                    status
+                )
+            
+            # Добавляем строку с итогами
+            if len(self.channels) > 8:
+                channels_table.add_row(
+                    "...", 
+                    f"[dim]и еще {len(self.channels) - 8} каналов[/dim]", 
+                    "[dim]...[/dim]", 
+                    "[dim]...[/dim]", 
+                    "[dim]...[/dim]",
+                    "[dim]...[/dim]"
+                )
+            
+            # Добавляем итоговую строку
+            channels_table.add_row(
+                "[bold]ИТОГО[/bold]",
+                f"[bold]{channels_count} каналов[/bold]",
+                f"[bold]{total_messages:,}[/bold]",
+                f"[bold]{total_size:.1f} МБ[/bold]",
+                "[bold]—[/bold]",
+                "[bold]—[/bold]"
+            )
+            
+            channels_panel = Panel(
+                channels_table,
+                border_style="cyan",
+                box=box.ROUNDED
+            )
+        else:
+            channels_panel = Panel(
+                "[yellow]⚠️ Каналы не загружены[/yellow]\n\n"
+                "Используйте пункт 7 - Импорт/Экспорт каналов для загрузки списка каналов.",
+                title="📋 Каналы",
+                border_style="yellow",
+                box=box.ROUNDED
+            )
+        
+        # Улучшенное меню
+        menu_panel = Panel(
+            "🎯 [bold green]Доступные действия[/bold green]\n\n"
+            "1. 📊 [cyan]Аналитика и отчеты[/cyan] - Детальная статистика и аналитика\n"
+            "2. 🗺️ [blue]Интерактивная карта каналов[/blue] - Визуальное представление\n"
+            "3. 🔄 [yellow]Экспорт каналов[/yellow] - Запуск экспорта в различные форматы\n"
+            "4. ⚙️ [magenta]Настройки[/magenta] - Управление конфигурацией\n"
+            "5. 📋 [green]Логи[/green] - Просмотр логов работы программы\n"
+            "6. 🎯 [red]Улучшенный CLI интерфейс[/red] - Расширенные возможности\n"
+            "7. 📁 [orange]Импорт/Экспорт каналов[/orange] - Управление списком каналов\n"
+            "8. 🔄 [purple]Постоянный экспорт каналов[/purple] - Автоматический мониторинг\n\n"
+            "0. 🚪 [dim]Выход[/dim] - Завершение работы программы",
+            title="📋 Главное меню",
+            border_style="green",
+            box=box.ROUNDED
+        )
+        
+        # Обновляем layout
+        layout["stats"].update(stats_layout)
+        layout["channels"].update(channels_panel)
+        layout["menu"].update(menu_panel)
+        
+        # Выводим все на экран
+        self.console.print(layout)
 
 async def main():
     """Главная функция"""
@@ -2205,17 +2323,24 @@ async def main():
         # Создаем улучшенный экспортер
         exporter = EnhancedTelegramExporter()
         
-        # Показываем приветствие
+        # Показываем улучшенное приветствие
+        welcome_text = Text("🚀 Добро пожаловать в улучшенную версию", style="bold blue")
+        welcome_text.append("\nTelegram Channel Exporter", style="bold green")
+        
         welcome_panel = Panel(
-            "🚀 Добро пожаловать в улучшенную версию Telegram Channel Exporter!\n\n"
-            "Новые возможности:\n"
-            "• 📊 Детальная аналитика и отчеты\n"
-            "• 🗺️ Интерактивная карта каналов\n"
-            "• 🎯 Улучшенный интерфейс\n"
-            "• 📈 Экспорт аналитики в JSON/CSV/HTML\n\n"
-            "Загрузка...",
+            f"{welcome_text}\n\n"
+            f"🎯 [bold green]Новые возможности:[/bold green]\n"
+            f"• 📊 [cyan]Детальная аналитика и отчеты[/cyan] - Полная статистика по каналам\n"
+            f"• 🗺️ [blue]Интерактивная карта каналов[/blue] - Визуальное представление данных\n"
+            f"• 🎯 [yellow]Улучшенный интерфейс[/yellow] - Современный и удобный дизайн\n"
+            f"• 📈 [magenta]Экспорт аналитики[/magenta] - JSON, CSV, HTML форматы\n"
+            f"• 🔄 [purple]Постоянный мониторинг[/purple] - Автоматическая проверка каналов\n"
+            f"• 🤖 [red]Уведомления в Telegram[/red] - Интеграция с ботом\n\n"
+            f"⚡ [bold]Инициализация системы...[/bold]",
             title="🎉 Улучшенная версия",
-            border_style="green"
+            border_style="green",
+            box=box.DOUBLE,
+            padding=(1, 2)
         )
         
         console.print(welcome_panel)
