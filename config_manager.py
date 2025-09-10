@@ -137,9 +137,15 @@ class ConfigManager:
     
     def is_bot_configured(self) -> bool:
         """Проверка настройки бота"""
-        return (self.config.bot.enabled and 
-                self.config.bot.token and 
-                self.config.bot.chat_id)
+        has_token_and_chat = (self.config.bot.token and 
+                             self.config.bot.chat_id)
+        
+        # Если токен и chat_id настроены, но enabled = False, автоматически включаем
+        if has_token_and_chat and not self.config.bot.enabled:
+            self.config.bot.enabled = True
+            self.save_config()
+        
+        return has_token_and_chat
     
     def setup_telegram_config(self, force_setup: bool = False):
         """Настройка конфигурации Telegram API"""

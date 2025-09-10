@@ -1849,12 +1849,41 @@ class EnhancedTelegramExporter(TelegramExporter):
         """Тест уведомлений в Telegram"""
         self.console.clear()
         
-        # Проверяем настройку бота
-        if not self.config_manager.is_bot_configured():
-            self.console.print("[yellow]⚠️ Bot не настроен[/yellow]")
-            self.console.print("Сначала настройте бота через пункт 4 - Настройки → 3. 🤖 Настройки бота")
+        # Детальная проверка настроек бота
+        config = self.config_manager.config
+        
+        if not config.bot.token:
+            self.console.print("[red]❌ Токен бота не настроен[/red]")
+            self.console.print("Настройте токен бота через пункт 4 - Настройки → 3. 🤖 Настройки бота")
             input("Нажмите Enter для продолжения...")
             return
+        
+        if not config.bot.chat_id:
+            self.console.print("[red]❌ Chat ID не настроен[/red]")
+            self.console.print("Настройте Chat ID через пункт 4 - Настройки → 3. 🤖 Настройки бота")
+            input("Нажмите Enter для продолжения...")
+            return
+        
+        # Показываем текущие настройки
+        settings_panel = Panel(
+            f"🤖 <b>Настройки бота:</b>\n"
+            f"🔑 <b>Токен:</b> {config.bot.token[:10]}...{config.bot.token[-5:]}\n"
+            f"💬 <b>Chat ID:</b> {config.bot.chat_id}\n"
+            f"🔔 <b>Уведомления:</b> {'Включены' if config.bot.notifications else 'Отключены'}\n"
+            f"⚙️ <b>Статус:</b> {'Включен' if config.bot.enabled else 'Отключен'}",
+            title="📋 Текущие настройки",
+            border_style="blue"
+        )
+        
+        self.console.print(settings_panel)
+        
+        # Дополнительная диагностика
+        self.console.print(f"[blue]🔍 Диагностика:[/blue]")
+        self.console.print(f"   • Токен настроен: {'✅' if config.bot.token else '❌'}")
+        self.console.print(f"   • Chat ID настроен: {'✅' if config.bot.chat_id else '❌'}")
+        self.console.print(f"   • Уведомления включены: {'✅' if config.bot.notifications else '❌'}")
+        self.console.print(f"   • Бот включен: {'✅' if config.bot.enabled else '❌'}")
+        self.console.print(f"   • Общий статус: {'✅ Настроен' if self.config_manager.is_bot_configured() else '❌ Не настроен'}")
         
         # Показываем информацию о тесте
         info_panel = Panel(
