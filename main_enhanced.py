@@ -234,19 +234,66 @@ class EnhancedTelegramExporter(TelegramExporter):
         with self.console.status("Анализ данных..."):
             time.sleep(1)
         
-        # Получаем данные для аналитики
-        channels_data = self._get_channels_data()
-        
-        if not channels_data:
-            self.console.print("[yellow]Нет данных для анализа[/yellow]")
+        # Проверяем наличие каналов
+        if not self.channels:
+            self.console.print("[yellow]⚠️ Нет каналов для анализа[/yellow]")
+            self.console.print("Сначала загрузите каналы через пункт 7 - Импорт/Экспорт каналов")
             input("Нажмите Enter для продолжения...")
             return
         
         # Генерируем отчет
-        report = self.analytics_reporter.generate_export_report(self.channels, self.stats)
-        self.console.print(report)
+        try:
+            report = self.analytics_reporter.generate_export_report(self.channels, self.stats)
+            self.console.print(report)
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка генерации отчета: {e}[/red]")
+            # Показываем простую статистику
+            self._show_simple_analytics()
         
         input("\nНажмите Enter для продолжения...")
+    
+    def _show_simple_analytics(self):
+        """Показать простую аналитику без сложных вычислений"""
+        self.console.clear()
+        
+        # Создаем простую таблицу статистики
+        table = Table(title="📊 Простая статистика", box=box.ROUNDED)
+        table.add_column("Метрика", style="cyan")
+        table.add_column("Значение", style="green")
+        
+        total_messages = sum(channel.total_messages for channel in self.channels)
+        total_size = sum(channel.media_size_mb for channel in self.channels)
+        
+        table.add_row("Всего каналов", f"{len(self.channels):,}")
+        table.add_row("Всего сообщений", f"{total_messages:,}")
+        table.add_row("Общий размер", f"{total_size:.1f} МБ")
+        table.add_row("Ошибок экспорта", f"{self.stats.export_errors:,}")
+        table.add_row("Отфильтровано", f"{self.stats.filtered_messages:,}")
+        
+        if self.stats.last_export_time:
+            table.add_row("Последний экспорт", str(self.stats.last_export_time))
+        
+        # Показываем топ-5 каналов по сообщениям
+        sorted_channels = sorted(self.channels, key=lambda x: x.total_messages, reverse=True)[:5]
+        
+        self.console.print(table)
+        
+        if sorted_channels:
+            top_table = Table(title="🏆 Топ-5 каналов по сообщениям", box=box.ROUNDED)
+            top_table.add_column("№", style="cyan", width=3, justify="center")
+            top_table.add_column("Канал", style="green")
+            top_table.add_column("Сообщений", style="yellow", justify="right")
+            top_table.add_column("Размер (МБ)", style="blue", justify="right")
+            
+            for i, channel in enumerate(sorted_channels, 1):
+                top_table.add_row(
+                    str(i),
+                    channel.title[:40] + "..." if len(channel.title) > 40 else channel.title,
+                    f"{channel.total_messages:,}",
+                    f"{channel.media_size_mb:.1f}"
+                )
+            
+            self.console.print(top_table)
     
     async def show_channel_analysis(self):
         """Показать анализ канала"""

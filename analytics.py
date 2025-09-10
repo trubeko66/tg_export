@@ -383,8 +383,15 @@ class AnalyticsReporter:
             for channel_name, message_count in analytics.most_active_channels:
                 active_table.add_row(channel_name, f"{message_count:,}")
         
+            # Создаем Layout для правильного отображения таблиц
+            layout = Layout()
+            layout.split_column(
+                Layout(table, name="main_stats"),
+                Layout(active_table, name="active_channels")
+            )
+            
             return Panel(
-                f"{table}\n\n{active_table}",
+                layout,
                 title="📈 Отчет по экспорту",
                 border_style="green"
             )
