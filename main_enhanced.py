@@ -1705,6 +1705,7 @@ class EnhancedTelegramExporter(TelegramExporter):
             "1. 🚀 Запустить постоянный экспорт\n"
             "2. ⚙️ Настройки интервала проверки\n"
             "3. 📊 Показать статистику каналов\n"
+            "4. 🧪 Тест уведомлений в Telegram\n"
             "0. 🔙 Назад",
             title="🔄 Меню постоянного экспорта",
             border_style="green"
@@ -1715,7 +1716,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         
         choice = Prompt.ask(
             "Выберите действие",
-            choices=["1", "2", "3", "0"]
+            choices=["1", "2", "3", "4", "0"]
         )
         
         if choice == "0":
@@ -1728,6 +1729,8 @@ class EnhancedTelegramExporter(TelegramExporter):
                 await self.show_interval_settings()
             elif choice == "3":
                 await self.show_channels_statistics()
+            elif choice == "4":
+                await self.test_telegram_notifications()
                 
         except Exception as e:
             self.console.print(f"[red]Ошибка: {e}[/red]")
@@ -1840,6 +1843,121 @@ class EnhancedTelegramExporter(TelegramExporter):
         )
         
         self.console.print(summary_panel)
+        input("\nНажмите Enter для продолжения...")
+    
+    async def test_telegram_notifications(self):
+        """Тест уведомлений в Telegram"""
+        self.console.clear()
+        
+        # Проверяем настройку бота
+        if not self.config_manager.is_bot_configured():
+            self.console.print("[yellow]⚠️ Bot не настроен[/yellow]")
+            self.console.print("Сначала настройте бота через пункт 4 - Настройки → 3. 🤖 Настройки бота")
+            input("Нажмите Enter для продолжения...")
+            return
+        
+        # Показываем информацию о тесте
+        info_panel = Panel(
+            "🧪 Тест уведомлений в Telegram\n\n"
+            "Этот тест отправит:\n"
+            "• Тестовое уведомление о новом канале\n"
+            "• Тестовую сводку постоянной проверки\n"
+            "• Проверит работу уведомлений\n\n"
+            "Убедитесь, что бот настроен правильно!",
+            title="🧪 Информация о тесте",
+            border_style="blue"
+        )
+        
+        self.console.print(info_panel)
+        
+        if not Confirm.ask("Отправить тестовые уведомления?"):
+            self.console.print("[yellow]Тест отменен[/yellow]")
+            input("Нажмите Enter для продолжения...")
+            return
+        
+        try:
+            # Тест 1: Уведомление о новом канале
+            self.console.print("[blue]📤 Отправка тестового уведомления о новом канале...[/blue]")
+            
+            # Создаем тестовый канал
+            test_channel = ChannelInfo(
+                id=999999,
+                title="🧪 Тестовый канал",
+                username="test_channel",
+                last_message_id=1,
+                total_messages=100,
+                last_check=datetime.now().isoformat(),
+                media_size_mb=5.5
+            )
+            
+            success1 = await self.telegram_notifier.send_new_channel_notification(test_channel)
+            
+            if success1:
+                self.console.print("[green]✅ Тестовое уведомление о канале отправлено[/green]")
+            else:
+                self.console.print("[red]❌ Ошибка отправки уведомления о канале[/red]")
+            
+            # Небольшая пауза между тестами
+            await asyncio.sleep(2)
+            
+            # Тест 2: Сводка постоянной проверки
+            self.console.print("[blue]📤 Отправка тестовой сводки постоянной проверки...[/blue]")
+            
+            # Создаем тестовые данные сводки
+            test_check_results = {
+                'total_channels': len(self.channels) if self.channels else 3,
+                'checked_channels': len(self.channels) if self.channels else 3,
+                'new_messages': 5,
+                'channels_with_messages': 2,
+                'channels_with_updates': [
+                    {'channel': 'Тестовый канал 1', 'new_messages': 3},
+                    {'channel': 'Тестовый канал 2', 'new_messages': 2}
+                ],
+                'check_duration': 2.5,
+                'check_interval': self.check_interval
+            }
+            
+            success2 = await self.telegram_notifier.send_continuous_check_summary(test_check_results)
+            
+            if success2:
+                self.console.print("[green]✅ Тестовая сводка отправлена[/green]")
+            else:
+                self.console.print("[red]❌ Ошибка отправки сводки[/red]")
+            
+            # Результаты теста
+            if success1 and success2:
+                result_panel = Panel(
+                    "🎉 Тест уведомлений завершен успешно!\n\n"
+                    "✅ Уведомление о новом канале - отправлено\n"
+                    "✅ Сводка постоянной проверки - отправлена\n\n"
+                    "Уведомления работают корректно!",
+                    title="🎉 Результат теста",
+                    border_style="green"
+                )
+            elif success1 or success2:
+                result_panel = Panel(
+                    "⚠️ Тест уведомлений завершен частично\n\n"
+                    f"{'✅' if success1 else '❌'} Уведомление о новом канале\n"
+                    f"{'✅' if success2 else '❌'} Сводка постоянной проверки\n\n"
+                    "Проверьте настройки бота!",
+                    title="⚠️ Результат теста",
+                    border_style="yellow"
+                )
+            else:
+                result_panel = Panel(
+                    "❌ Тест уведомлений не прошел\n\n"
+                    "❌ Уведомление о новом канале - ошибка\n"
+                    "❌ Сводка постоянной проверки - ошибка\n\n"
+                    "Проверьте настройки бота и подключение к интернету!",
+                    title="❌ Результат теста",
+                    border_style="red"
+                )
+            
+            self.console.print(result_panel)
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка теста уведомлений: {e}[/red]")
+        
         input("\nНажмите Enter для продолжения...")
     
     async def show_interval_settings(self):

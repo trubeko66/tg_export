@@ -156,17 +156,20 @@ class ContinuousExporter:
     async def _show_export_status(self):
         """Показ статусного экрана экспорта"""
         try:
-            # Создаем статусный экран
-            layout = self._create_continuous_export_display()
+            # Показываем статус с обратным отсчетом
+            # Время отображения зависит от интервала, но не более 10 секунд
+            display_time = min(self.check_interval, 10)
             
-            # Показываем статус на 5 секунд с обновлением каждую секунду
-            with Live(layout, refresh_per_second=1, console=self.console) as live:
-                await asyncio.sleep(5)
+            for remaining in range(display_time, 0, -1):
+                layout = self._create_continuous_export_display(remaining)
+                
+                with Live(layout, refresh_per_second=1, console=self.console) as live:
+                    await asyncio.sleep(1)
                 
         except Exception as e:
             self.console.print(f"[red]Ошибка отображения статуса: {e}[/red]")
     
-    def _create_continuous_export_display(self) -> Layout:
+    def _create_continuous_export_display(self, countdown: int = 0) -> Layout:
         """Создание статусного экрана постоянного экспорта"""
         layout = Layout()
         
@@ -198,7 +201,7 @@ class ContinuousExporter:
         layout["main"]["left"].update(Panel(channels_table, title="📋 Статус каналов", box=box.ROUNDED, expand=True))
         
         # Правая панель - статистика
-        stats_content = self._create_continuous_stats()
+        stats_content = self._create_continuous_stats(countdown)
         layout["main"]["right"].update(Panel(stats_content, title="📊 Статистика", box=box.ROUNDED))
         
         # Подвал
@@ -271,7 +274,7 @@ class ContinuousExporter:
         
         return table
     
-    def _create_continuous_stats(self) -> Text:
+    def _create_continuous_stats(self, countdown: int = 0) -> Text:
         """Создание статистики постоянного экспорта"""
         stats_text = Text()
         
@@ -628,7 +631,10 @@ class ContinuousExporter:
         
         # Следующая проверка
         stats_text.append("\n🔄 Следующая проверка\n\n", style="bold yellow")
-        stats_text.append(f"⏰ Через {self.check_interval} секунд\n", style="blue")
+        if countdown > 0:
+            stats_text.append(f"⏰ Через {countdown} секунд\n", style="bold red")
+        else:
+            stats_text.append(f"⏰ Через {self.check_interval} секунд\n", style="blue")
         
         return stats_text
     
