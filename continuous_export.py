@@ -24,6 +24,7 @@ from rich import box
 from telegram_exporter import TelegramExporter, ChannelInfo
 from config_manager import ConfigManager
 from content_filter import ContentFilter
+from telegram_notifications import TelegramNotifier
 
 
 class ContinuousExporter:
@@ -33,10 +34,12 @@ class ContinuousExporter:
         self.console = console
         self.config_manager = ConfigManager()
         self.content_filter = ContentFilter()
+        self.telegram_notifier = TelegramNotifier(console)  # Уведомления в Telegram
         self.exporter = None
         self.channels = []
         self.is_running = False
         self.should_stop = False
+        self.telegram_connected = False  # Статус подключения к Telegram
         self.last_check_times = {}  # Время последней проверки для каждого канала
         self.export_stats = {
             'total_channels': 0,
@@ -47,6 +50,7 @@ class ContinuousExporter:
             'errors': 0
         }
         self.channel_new_messages = {}  # Словарь для хранения новых сообщений по каналам
+        self.check_interval = 30  # Интервал проверки в секундах (по умолчанию 30)
         
         # Настройка обработчика сигналов для корректного завершения
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -60,11 +64,7 @@ class ContinuousExporter:
     async def initialize(self):
         """Инициализация экспортера"""
         try:
-            # Создаем базовый экспортер
-            self.exporter = TelegramExporter()
-            await self.exporter.initialize_client(force_reauth=False)
-            
-            # Загружаем каналы
+            # Загружаем каналы сначала
             if self.config_manager.channels_file_exists():
                 self.channels = self.config_manager.import_channels()
                 self.console.print(f"[green]✅ Загружено {len(self.channels)} каналов[/green]")
@@ -74,6 +74,20 @@ class ContinuousExporter:
             
             # Инициализируем статистику
             self.export_stats['total_channels'] = len(self.channels)
+            
+            # Пытаемся инициализировать Telegram клиент
+            try:
+                self.console.print("[blue]🔄 Подключение к Telegram...[/blue]")
+                self.exporter = TelegramExporter()
+                await self.exporter.initialize_client(force_reauth=False)
+                self.console.print("[green]✅ Подключение к Telegram успешно[/green]")
+                self.telegram_connected = True
+                
+            except Exception as telegram_error:
+                self.console.print(f"[yellow]⚠️ Не удалось подключиться к Telegram: {telegram_error}[/yellow]")
+                self.console.print("[blue]🔄 Переходим в демо-режим...[/blue]")
+                self.exporter = None
+                self.telegram_connected = False
             
             return True
             
@@ -107,25 +121,37 @@ class ContinuousExporter:
     
     async def _main_export_loop(self):
         """Основной цикл экспорта"""
-        # Первоначальная проверка всех каналов
-        self.console.print("[blue]🔄 Выполняется первоначальная проверка каналов...[/blue]")
-        await self._check_channels_for_updates()
-        
-        # Основной цикл
-        while not self.should_stop:
-            try:
-                # Показываем статусный экран между проверками
-                await self._show_export_status()
-                
-                # Проверяем каналы на новые сообщения каждые 30 секунд
-                await self._check_channels_for_updates()
-                
-                # Ждем перед следующей проверкой
-                await asyncio.sleep(30)  # Проверяем каждые 30 секунд
-                
-            except Exception as e:
-                self.console.print(f"[red]❌ Ошибка в основном цикле: {e}[/red]")
-                await asyncio.sleep(5)
+        try:
+            # Первоначальная проверка всех каналов
+            self.console.print("[blue]🔄 Выполняется первоначальная проверка каналов...[/blue]")
+            await self._check_channels_for_updates()
+            
+            # Основной цикл
+            while not self.should_stop:
+                try:
+                    # Показываем статусный экран между проверками
+                    await self._show_export_status()
+                    
+                    # Проверяем каналы на новые сообщения с настраиваемым интервалом
+                    await self._check_channels_for_updates()
+                    
+                    # Ждем перед следующей проверкой
+                    await asyncio.sleep(self.check_interval)  # Проверяем с настраиваемым интервалом
+                    
+                except KeyboardInterrupt:
+                    self.console.print("\n[yellow]Получен сигнал прерывания...[/yellow]")
+                    self.should_stop = True
+                    break
+                except Exception as e:
+                    self.console.print(f"[red]❌ Ошибка в основном цикле: {e}[/red]")
+                    await asyncio.sleep(5)
+                    
+        except KeyboardInterrupt:
+            self.console.print("\n[yellow]Экспорт прерван пользователем[/yellow]")
+            self.should_stop = True
+        except Exception as e:
+            self.console.print(f"[red]❌ Критическая ошибка в основном цикле: {e}[/red]")
+            self.should_stop = True
     
     async def _show_export_status(self):
         """Показ статусного экрана экспорта"""
@@ -152,8 +178,12 @@ class ContinuousExporter:
         
         # Заголовок
         current_time = datetime.now().strftime("%H:%M:%S")
+        mode_text = "Демо-режим" if not self.telegram_connected else "Реальный режим"
+        mode_style = "yellow" if not self.telegram_connected else "green"
+        
         header_text = Text("🔄 Постоянный экспорт каналов", style="bold magenta")
         header_text.append(f" | Время: {current_time}", style="cyan")
+        header_text.append(f" | Режим: {mode_text}", style=f"bold {mode_style}")
         header_text.append(" | Статус: Активен", style="bold green")
         layout["header"].update(Panel(header_text, box=box.DOUBLE))
         
@@ -297,6 +327,12 @@ class ContinuousExporter:
             stats_text.append("🟢 Система активна\n", style="green")
         else:
             stats_text.append("🔴 Система остановлена\n", style="red")
+        
+        # Режим работы
+        if self.telegram_connected:
+            stats_text.append("📡 Telegram: подключен\n", style="green")
+        else:
+            stats_text.append("📡 Telegram: демо-режим\n", style="yellow")
         
         return stats_text
     
@@ -592,7 +628,7 @@ class ContinuousExporter:
         
         # Следующая проверка
         stats_text.append("\n🔄 Следующая проверка\n\n", style="bold yellow")
-        stats_text.append("⏰ Через 30 секунд\n", style="blue")
+        stats_text.append(f"⏰ Через {self.check_interval} секунд\n", style="blue")
         
         return stats_text
     
@@ -637,6 +673,9 @@ class ContinuousExporter:
             
             # Показываем финальный статусный экран с результатами
             await self._show_final_check_status()
+            
+            # Отправляем сводку в Telegram
+            await self._send_check_summary()
                 
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка проверки каналов: {e}[/red]")
@@ -645,10 +684,19 @@ class ContinuousExporter:
     async def _check_single_channel(self, channel: ChannelInfo) -> int:
         """Проверка одного канала на новые сообщения"""
         try:
-            if not self.exporter or not self.exporter.client:
+            # Если Telegram не подключен, работаем в демо-режиме
+            if not self.telegram_connected or not self.exporter or not self.exporter.client:
+                await asyncio.sleep(0.1)  # Симуляция задержки
+                
+                # Симулируем обнаружение новых сообщений (каждый 5-й канал)
+                if channel.id % 5 == 0:
+                    # Обновляем информацию о канале
+                    channel.last_message_id += 1
+                    channel.last_check = datetime.now().isoformat()
+                    return 1
                 return 0
             
-            # Получаем последнее сообщение из канала
+            # Реальная проверка через Telegram API
             try:
                 entity = await self.exporter.client.get_entity(channel.id)
                 messages = await self.exporter.client.get_messages(entity, limit=1)
@@ -670,6 +718,8 @@ class ContinuousExporter:
                 
                 # Симулируем обнаружение новых сообщений (каждый 5-й канал)
                 if channel.id % 5 == 0:
+                    channel.last_message_id += 1
+                    channel.last_check = datetime.now().isoformat()
                     return 1
                 return 0
                 
@@ -681,11 +731,50 @@ class ContinuousExporter:
     async def _cleanup(self):
         """Очистка ресурсов при завершении"""
         try:
-            if self.exporter and hasattr(self.exporter, 'disconnect'):
+            if self.telegram_connected and self.exporter and hasattr(self.exporter, 'disconnect'):
                 await self.exporter.disconnect()
+                self.console.print("[green]✅ Telegram клиент отключен[/green]")
             self.console.print("[green]✅ Очистка ресурсов завершена[/green]")
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка очистки: {e}[/red]")
+    
+    async def _send_check_summary(self):
+        """Отправка сводки по завершении проверки каналов"""
+        try:
+            # Подготавливаем данные для сводки
+            check_duration = (datetime.now() - self._last_check_time).total_seconds() if hasattr(self, '_last_check_time') else 0
+            
+            # Собираем каналы с новыми сообщениями
+            channels_with_updates = []
+            total_new_messages = 0
+            channels_with_messages = 0
+            
+            for channel in self.channels:
+                new_messages = self.channel_new_messages.get(channel.id, 0)
+                if new_messages > 0:
+                    channels_with_updates.append({
+                        'channel': channel.title,
+                        'new_messages': new_messages
+                    })
+                    total_new_messages += new_messages
+                    channels_with_messages += 1
+            
+            # Формируем данные сводки
+            check_results = {
+                'total_channels': len(self.channels),
+                'checked_channels': len(self.channels),
+                'new_messages': total_new_messages,
+                'channels_with_messages': channels_with_messages,
+                'channels_with_updates': channels_with_updates,
+                'check_duration': check_duration,
+                'check_interval': self.check_interval
+            }
+            
+            # Отправляем сводку
+            await self.telegram_notifier.send_continuous_check_summary(check_results)
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка отправки сводки: {e}[/red]")
 
 
 async def main():

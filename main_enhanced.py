@@ -31,7 +31,6 @@ from html_reporter import HTMLReporter
 from simple_cli import SimpleCLI
 from settings_methods import SettingsMethods
 from continuous_export import ContinuousExporter
-from daily_checker import DailyChannelChecker
 from telegram_notifications import TelegramNotifier
 
 
@@ -47,6 +46,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         self.config_manager = ConfigManager()
         self.settings_methods = SettingsMethods(self.console, self.config_manager)
         self.telegram_notifier = TelegramNotifier(self.console)
+        self.check_interval = 30  # Интервал проверки в секундах (по умолчанию 30)
     
     async def initialize(self):
         """Инициализация улучшенного экспортера"""
@@ -109,7 +109,6 @@ class EnhancedTelegramExporter(TelegramExporter):
                 "6. 🎯 Улучшенный CLI интерфейс\n"
                 "7. 📁 Импорт/Экспорт каналов\n"
                 "8. 🔄 Постоянный экспорт каналов\n"
-                "9. 🕐 Ежедневная проверка каналов\n"
                 "0. 🚪 Выход",
                 title="📋 Главное меню",
                 border_style="green"
@@ -150,7 +149,7 @@ class EnhancedTelegramExporter(TelegramExporter):
             
             choice = Prompt.ask(
                 "Выберите действие",
-                choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "q", "quit"]
+                choices=["1", "2", "3", "4", "5", "6", "7", "8", "0", "q", "quit"]
             )
             
             if choice in ["0", "q", "quit"]:
@@ -175,8 +174,6 @@ class EnhancedTelegramExporter(TelegramExporter):
                     await self.show_channels_import_export_menu()
                 elif choice == "8":
                     await self.show_continuous_export_menu()
-                elif choice == "9":
-                    await self.show_daily_checker_menu()
                     
             except KeyboardInterrupt:
                 if Confirm.ask("\nПрервать операцию?"):
@@ -1659,7 +1656,8 @@ class EnhancedTelegramExporter(TelegramExporter):
         menu_panel = Panel(
             "🔄 Постоянный экспорт каналов\n\n"
             "1. 🚀 Запустить постоянный экспорт\n"
-            "2. 📊 Показать статистику каналов\n"
+            "2. ⚙️ Настройки интервала проверки\n"
+            "3. 📊 Показать статистику каналов\n"
             "0. 🔙 Назад",
             title="🔄 Меню постоянного экспорта",
             border_style="green"
@@ -1670,7 +1668,7 @@ class EnhancedTelegramExporter(TelegramExporter):
         
         choice = Prompt.ask(
             "Выберите действие",
-            choices=["1", "2", "0"]
+            choices=["1", "2", "3", "0"]
         )
         
         if choice == "0":
@@ -1680,6 +1678,8 @@ class EnhancedTelegramExporter(TelegramExporter):
             if choice == "1":
                 await self.start_continuous_export()
             elif choice == "2":
+                await self.show_interval_settings()
+            elif choice == "3":
                 await self.show_channels_statistics()
                 
         except Exception as e:
@@ -1690,10 +1690,27 @@ class EnhancedTelegramExporter(TelegramExporter):
         """Запуск постоянного экспорта"""
         self.console.clear()
         
+        # Показываем текущие настройки
+        settings_panel = Panel(
+            f"🚀 Запуск постоянного экспорта\n\n"
+            f"Интервал проверки: {self.check_interval} секунд\n"
+            f"Каналов для проверки: {len(self.channels) if self.channels else 0}\n\n"
+            f"Программа будет:\n"
+            f"• Проверять каналы каждые {self.check_interval} секунд\n"
+            f"• Отправлять уведомления о новых сообщениях\n"
+            f"• Сохранять результаты в лог\n\n"
+            f"Для выхода нажмите Ctrl+C",
+            title="🚀 Настройки запуска",
+            border_style="green"
+        )
+        
+        self.console.print(settings_panel)
+        
         if Confirm.ask("Запустить постоянный экспорт каналов?"):
             try:
                 # Создаем и запускаем постоянный экспортер
                 continuous_exporter = ContinuousExporter(self.console)
+                continuous_exporter.check_interval = self.check_interval  # Передаем интервал
                 await continuous_exporter.start_continuous_export()
                 
             except Exception as e:
@@ -1778,137 +1795,78 @@ class EnhancedTelegramExporter(TelegramExporter):
         self.console.print(summary_panel)
         input("\nНажмите Enter для продолжения...")
     
-    async def show_daily_checker_menu(self):
-        """Показать меню ежедневной проверки"""
+    async def show_interval_settings(self):
+        """Показать настройки интервала проверки"""
         self.console.clear()
         
-        # Показываем информацию о ежедневной проверке
-        info_panel = Panel(
-            "🕐 Ежедневная проверка каналов\n\n"
-            "Функции ежедневной проверки:\n"
-            "• Проверка каналов в 8:00 по Пермскому времени\n"
-            "• Обнаружение новых сообщений\n"
-            "• Применение правил фильтрации\n"
-            "• Дописывание в существующие MD файлы\n"
-            "• Отправка ежедневной сводки в Telegram\n\n"
-            "💡 Планировщик работает в фоновом режиме",
-            title="ℹ️ Информация",
+        # Показываем текущие настройки
+        current_settings_panel = Panel(
+            f"⚙️ Настройки интервала проверки\n\n"
+            f"Текущий интервал: {self.check_interval} секунд\n"
+            f"Это означает, что каналы будут проверяться каждые {self.check_interval} секунд\n\n"
+            f"Рекомендуемые интервалы:\n"
+            f"• 10-30 секунд - для активных каналов\n"
+            f"• 60-300 секунд - для обычных каналов\n"
+            f"• 600+ секунд - для редко обновляемых каналов",
+            title="⚙️ Текущие настройки",
             border_style="blue"
         )
         
-        menu_panel = Panel(
-            "🕐 Ежедневная проверка каналов\n\n"
-            "1. 🚀 Запустить планировщик\n"
-            "2. 🧪 Тест ежедневной проверки\n"
-            "3. ⚙️ Настройки планировщика\n"
-            "4. 📊 Показать расписание\n"
-            "0. 🔙 Назад",
-            title="🕐 Меню ежедневной проверки",
-            border_style="green"
-        )
+        self.console.print(current_settings_panel)
         
-        self.console.print(info_panel)
-        self.console.print(menu_panel)
+        # Предлагаем варианты интервалов
+        interval_options = [
+            ("10 секунд", 10),
+            ("30 секунд", 30),
+            ("1 минута", 60),
+            ("5 минут", 300),
+            ("10 минут", 600),
+            ("30 минут", 1800),
+            ("1 час", 3600),
+            ("Произвольное значение", -1)
+        ]
+        
+        table = Table(title="📋 Варианты интервалов", box=box.ROUNDED)
+        table.add_column("№", style="cyan", width=3, justify="center")
+        table.add_column("Интервал", style="green")
+        table.add_column("Секунды", style="yellow", justify="right")
+        
+        for i, (name, seconds) in enumerate(interval_options, 1):
+            table.add_row(str(i), name, str(seconds))
+        
+        self.console.print(table)
         
         choice = Prompt.ask(
-            "Выберите действие",
-            choices=["1", "2", "3", "4", "0"]
+            "Выберите интервал или введите произвольное значение",
+            choices=[str(i) for i in range(1, len(interval_options) + 1)]
         )
-        
-        if choice == "0":
-            return
         
         try:
-            if choice == "1":
-                await self.start_daily_checker()
-            elif choice == "2":
-                await self.test_daily_check()
-            elif choice == "3":
-                await self.show_scheduler_settings()
-            elif choice == "4":
-                await self.show_scheduler_schedule()
+            choice_index = int(choice) - 1
+            if 0 <= choice_index < len(interval_options):
+                name, seconds = interval_options[choice_index]
                 
-        except Exception as e:
-            self.console.print(f"[red]Ошибка: {e}[/red]")
-            input("Нажмите Enter для продолжения...")
-    
-    async def start_daily_checker(self):
-        """Запуск планировщика ежедневной проверки"""
-        self.console.clear()
-        
-        if Confirm.ask("Запустить планировщик ежедневной проверки?"):
-            try:
-                # Создаем и запускаем планировщик
-                daily_checker = DailyChannelChecker(self.console)
-                daily_checker.schedule_daily_check()
+                if seconds == -1:  # Произвольное значение
+                    custom_seconds = IntPrompt.ask(
+                        "Введите интервал в секундах",
+                        default=self.check_interval
+                    )
+                    if custom_seconds > 0:
+                        self.check_interval = custom_seconds
+                        self.console.print(f"[green]✅ Интервал установлен: {custom_seconds} секунд[/green]")
+                    else:
+                        self.console.print("[red]❌ Интервал должен быть больше 0[/red]")
+                else:
+                    self.check_interval = seconds
+                    self.console.print(f"[green]✅ Интервал установлен: {name} ({seconds} секунд)[/green]")
+            else:
+                self.console.print("[red]❌ Неверный выбор[/red]")
                 
-                self.console.print("[green]✅ Планировщик ежедневной проверки запущен[/green]")
-                self.console.print("[blue]📅 Проверка запланирована на 8:00 по Пермскому времени[/blue]")
-                self.console.print("[yellow]💡 Нажмите Ctrl+C для выхода[/yellow]")
-                
-                # Ждем бесконечно
-                while True:
-                    await asyncio.sleep(60)
-                    
-            except KeyboardInterrupt:
-                self.console.print("\n[yellow]Планировщик остановлен пользователем[/yellow]")
-            except Exception as e:
-                self.console.print(f"[red]❌ Ошибка планировщика: {e}[/red]")
-                input("Нажмите Enter для продолжения...")
+        except (ValueError, IndexError):
+            self.console.print("[red]❌ Неверный формат ввода[/red]")
+        
+        input("\nНажмите Enter для продолжения...")
     
-    async def test_daily_check(self):
-        """Тест ежедневной проверки"""
-        self.console.clear()
-        
-        if Confirm.ask("Выполнить тестовую ежедневную проверку?"):
-            try:
-                # Создаем и запускаем тестовую проверку
-                daily_checker = DailyChannelChecker(self.console)
-                await daily_checker._perform_daily_check()
-                
-            except Exception as e:
-                self.console.print(f"[red]❌ Ошибка тестовой проверки: {e}[/red]")
-                input("Нажмите Enter для продолжения...")
-    
-    async def show_scheduler_settings(self):
-        """Показать настройки планировщика"""
-        self.console.clear()
-        
-        settings_panel = Panel(
-            "⚙️ Настройки планировщика\n\n"
-            "Текущие настройки:\n"
-            "• Время проверки: 8:00 по Пермскому времени\n"
-            "• Частота: Ежедневно\n"
-            "• Уведомления: Включены\n"
-            "• Фильтрация: Включена\n\n"
-            "💡 Настройки можно изменить в config_manager.py",
-            title="⚙️ Настройки",
-            border_style="blue"
-        )
-        
-        self.console.print(settings_panel)
-        input("Нажмите Enter для продолжения...")
-    
-    async def show_scheduler_schedule(self):
-        """Показать расписание планировщика"""
-        self.console.clear()
-        
-        schedule_panel = Panel(
-            "📅 Расписание планировщика\n\n"
-            "Ежедневные задачи:\n"
-            "• 08:00 - Проверка всех каналов\n"
-            "• 08:05 - Применение фильтрации\n"
-            "• 08:10 - Экспорт новых сообщений\n"
-            "• 08:15 - Отправка сводки в Telegram\n\n"
-            "⏰ Следующая проверка: Завтра в 08:00",
-            title="📅 Расписание",
-            border_style="green"
-        )
-        
-        self.console.print(schedule_panel)
-        input("Нажмите Enter для продолжения...")
-
-
 async def main():
     """Главная функция"""
     console = Console()

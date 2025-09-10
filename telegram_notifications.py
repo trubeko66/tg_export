@@ -76,6 +76,33 @@ class TelegramNotifier:
             self._save_report_to_log(report_data)
             return False
     
+    async def send_continuous_check_summary(self, check_results: dict):
+        """Отправка сводки по завершении постоянной проверки"""
+        try:
+            if not self.is_configured():
+                self.console.print("[yellow]⚠️ Bot не настроен, сводка сохранена в лог[/yellow]")
+                # Сохраняем сводку в лог файл
+                self._save_continuous_check_to_log(check_results)
+                return False
+            
+            message = self._create_continuous_check_message(check_results)
+            success = await self._send_message(message)
+            
+            if success:
+                self.console.print("[green]✅ Сводка постоянной проверки отправлена в Telegram[/green]")
+            else:
+                self.console.print("[red]❌ Ошибка отправки сводки постоянной проверки[/red]")
+                # Сохраняем в лог при ошибке отправки
+                self._save_continuous_check_to_log(check_results)
+            
+            return success
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка отправки сводки постоянной проверки: {e}[/red]")
+            # Сохраняем в лог при исключении
+            self._save_continuous_check_to_log(check_results)
+            return False
+    
     async def send_error_notification(self, error_message: str, channel_name: str = ""):
         """Отправка уведомления об ошибке"""
         try:
@@ -284,6 +311,89 @@ class TelegramNotifier:
                 
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка обработки очереди: {e}[/red]")
+    
+    def _create_continuous_check_message(self, check_results: dict) -> str:
+        """Создание сообщения сводки постоянной проверки"""
+        try:
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            message = f"🔄 <b>Сводка постоянной проверки каналов</b>\n"
+            message += f"⏰ <b>Время:</b> {current_time}\n\n"
+            
+            # Статистика проверки
+            total_channels = check_results.get('total_channels', 0)
+            checked_channels = check_results.get('checked_channels', 0)
+            new_messages = check_results.get('new_messages', 0)
+            channels_with_messages = check_results.get('channels_with_messages', 0)
+            
+            message += f"📊 <b>Статистика проверки:</b>\n"
+            message += f"• Всего каналов: {total_channels}\n"
+            message += f"• Проверено: {checked_channels}\n"
+            message += f"• Новых сообщений: {new_messages}\n"
+            message += f"• Каналов с обновлениями: {channels_with_messages}\n\n"
+            
+            # Каналы с новыми сообщениями
+            channels_with_updates = check_results.get('channels_with_updates', [])
+            if channels_with_updates:
+                message += f"🆕 <b>Каналы с новыми сообщениями:</b>\n"
+                for channel_info in channels_with_updates:
+                    channel_name = channel_info.get('channel', 'Неизвестно')
+                    new_count = channel_info.get('new_messages', 0)
+                    message += f"• <b>{channel_name}</b>: {new_count} сообщений\n"
+            else:
+                message += f"✅ <b>Новых сообщений не обнаружено</b>\n"
+            
+            # Время проверки
+            check_duration = check_results.get('check_duration', 0)
+            if check_duration > 0:
+                message += f"\n⏱️ <b>Время проверки:</b> {check_duration:.1f}с\n"
+            
+            # Следующая проверка
+            check_interval = check_results.get('check_interval', 30)
+            message += f"🔄 <b>Следующая проверка:</b> через {check_interval} секунд"
+            
+            return message
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка создания сообщения сводки: {e}[/red]")
+            return f"Ошибка создания сводки постоянной проверки"
+    
+    def _save_continuous_check_to_log(self, check_results: dict):
+        """Сохранение сводки постоянной проверки в лог"""
+        try:
+            log_file = Path("continuous_check_reports.log")
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"\n=== Сводка постоянной проверки - {current_time} ===\n")
+                
+                # Статистика
+                f.write(f"Всего каналов: {check_results.get('total_channels', 0)}\n")
+                f.write(f"Проверено: {check_results.get('checked_channels', 0)}\n")
+                f.write(f"Новых сообщений: {check_results.get('new_messages', 0)}\n")
+                f.write(f"Каналов с обновлениями: {check_results.get('channels_with_messages', 0)}\n")
+                
+                # Каналы с обновлениями
+                channels_with_updates = check_results.get('channels_with_updates', [])
+                if channels_with_updates:
+                    f.write("Каналы с новыми сообщениями:\n")
+                    for channel_info in channels_with_updates:
+                        channel_name = channel_info.get('channel', 'Неизвестно')
+                        new_count = channel_info.get('new_messages', 0)
+                        f.write(f"  - {channel_name}: {new_count} сообщений\n")
+                else:
+                    f.write("Новых сообщений не обнаружено\n")
+                
+                # Время проверки
+                check_duration = check_results.get('check_duration', 0)
+                if check_duration > 0:
+                    f.write(f"Время проверки: {check_duration:.1f}с\n")
+                
+                f.write("=" * 50 + "\n")
+            
+            self.console.print(f"[blue]📝 Сводка сохранена в лог: {log_file}[/blue]")
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка сохранения сводки в лог: {e}[/red]")
 
 
 # Глобальный экземпляр для использования в других модулях
