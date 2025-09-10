@@ -126,29 +126,29 @@ class TelegramNotifier:
     def _create_new_channel_message(self, channel: ChannelInfo) -> str:
         """Создание сообщения о новом канале"""
         try:
-            message = f"🆕 <b>Новый канал добавлен в экспорт</b>\n\n"
-            message += f"📺 <b>Название:</b> {channel.title}\n"
+            message = f"🆕 Новый канал добавлен в экспорт\n\n"
+            message += f"📺 Название: {channel.title}\n"
             
             if hasattr(channel, 'username') and channel.username:
-                message += f"🔗 <b>Username:</b> @{channel.username}\n"
+                message += f"🔗 Username: @{channel.username}\n"
             
             if hasattr(channel, 'id') and channel.id:
-                message += f"🆔 <b>ID:</b> {channel.id}\n"
+                message += f"🆔 ID: {channel.id}\n"
             
             if hasattr(channel, 'description') and channel.description:
-                message += f"📝 <b>Описание:</b> {channel.description[:200]}...\n"
+                message += f"📝 Описание: {channel.description[:200]}...\n"
             
             if hasattr(channel, 'subscribers_count') and channel.subscribers_count:
-                message += f"👥 <b>Подписчиков:</b> {channel.subscribers_count:,}\n"
+                message += f"👥 Подписчиков: {channel.subscribers_count:,}\n"
             
             if hasattr(channel, 'total_messages') and channel.total_messages:
-                message += f"💬 <b>Сообщений:</b> {channel.total_messages:,}\n"
+                message += f"💬 Сообщений: {channel.total_messages:,}\n"
             
             if hasattr(channel, 'media_size_mb') and channel.media_size_mb:
-                message += f"📁 <b>Размер медиа:</b> {channel.media_size_mb:.1f} МБ\n"
+                message += f"📁 Размер медиа: {channel.media_size_mb:.1f} МБ\n"
             
-            message += f"\n⏰ <b>Время добавления:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            message += f"🔄 <b>Статус:</b> Ожидает экспорта"
+            message += f"\n⏰ Время добавления: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            message += f"🔄 Статус: Ожидает экспорта"
             
             return message
             
@@ -159,11 +159,11 @@ class TelegramNotifier:
     def _create_daily_report_message(self, report_data: dict) -> str:
         """Создание сообщения ежедневной сводки"""
         try:
-            message = f"📊 <b>Ежедневная сводка экспорта каналов</b>\n"
-            message += f"📅 <b>Дата:</b> {report_data.get('date', 'Неизвестно')}\n\n"
+            message = f"📊 Ежедневная сводка экспорта каналов\n"
+            message += f"📅 Дата: {report_data.get('date', 'Неизвестно')}\n\n"
             
             # Статистика
-            message += f"📈 <b>Статистика:</b>\n"
+            message += f"📈 Статистика:\n"
             message += f"• Всего каналов: {report_data.get('total_channels', 0)}\n"
             message += f"• Проверено каналов: {report_data.get('checked_channels', 0)}\n"
             message += f"• Новых сообщений: {report_data.get('new_messages', 0)}\n"
@@ -174,14 +174,14 @@ class TelegramNotifier:
             # Каналы с обновлениями
             channels_with_updates = report_data.get('channels_with_updates', [])
             if channels_with_updates:
-                message += f"🔄 <b>Каналы с обновлениями:</b>\n"
+                message += f"🔄 Каналы с обновлениями:\n"
                 for channel_info in channels_with_updates:
                     message += f"• {channel_info.get('channel', 'Неизвестно')}: {channel_info.get('new_messages', 0)} сообщений\n"
             else:
-                message += f"✅ <b>Новых сообщений не обнаружено</b>\n"
+                message += f"✅ Новых сообщений не обнаружено\n"
             
             # Время отправки
-            message += f"\n⏰ <b>Время отправки:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            message += f"\n⏰ Время отправки: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             
             return message
             
@@ -192,14 +192,14 @@ class TelegramNotifier:
     def _create_error_message(self, error_message: str, channel_name: str = "") -> str:
         """Создание сообщения об ошибке"""
         try:
-            message = f"❌ <b>Ошибка экспорта каналов</b>\n\n"
+            message = f"❌ Ошибка экспорта каналов\n\n"
             
             if channel_name:
-                message += f"📺 <b>Канал:</b> {channel_name}\n"
+                message += f"📺 Канал: {channel_name}\n"
             
-            message += f"🚨 <b>Ошибка:</b> {error_message}\n"
-            message += f"⏰ <b>Время:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            message += f"🔧 <b>Действие:</b> Проверьте логи и настройки"
+            message += f"🚨 Ошибка: {error_message}\n"
+            message += f"⏰ Время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            message += f"🔧 Действие: Проверьте логи и настройки"
             
             return message
             
@@ -228,7 +228,6 @@ class TelegramNotifier:
             data = {
                 'chat_id': config.bot.chat_id,
                 'text': clean_message,
-                'parse_mode': 'HTML',
                 'disable_web_page_preview': True
             }
             
@@ -255,17 +254,11 @@ class TelegramNotifier:
     def _clean_message_for_telegram(self, message: str) -> str:
         """Очистка сообщения для отправки в Telegram"""
         try:
-            # Убираем потенциально проблемные символы
-            clean_message = message
-            
-            # Заменяем недопустимые HTML символы
-            clean_message = clean_message.replace('&', '&amp;')
-            clean_message = clean_message.replace('<', '&lt;')
-            clean_message = clean_message.replace('>', '&gt;')
-            
             # Ограничиваем длину сообщения (Telegram лимит 4096 символов)
-            if len(clean_message) > 4000:
-                clean_message = clean_message[:4000] + "\n\n... (сообщение обрезано)"
+            if len(message) > 4000:
+                clean_message = message[:4000] + "\n\n... (сообщение обрезано)"
+            else:
+                clean_message = message
             
             return clean_message
             
@@ -387,8 +380,8 @@ class TelegramNotifier:
         """Создание сообщения сводки постоянной проверки"""
         try:
             current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            message = f"🔄 <b>Сводка постоянной проверки каналов</b>\n"
-            message += f"⏰ <b>Время:</b> {current_time}\n\n"
+            message = f"🔄 Сводка постоянной проверки каналов\n"
+            message += f"⏰ Время: {current_time}\n\n"
             
             # Статистика проверки
             total_channels = check_results.get('total_channels', 0)
@@ -396,7 +389,7 @@ class TelegramNotifier:
             new_messages = check_results.get('new_messages', 0)
             channels_with_messages = check_results.get('channels_with_messages', 0)
             
-            message += f"📊 <b>Статистика проверки:</b>\n"
+            message += f"📊 Статистика проверки:\n"
             message += f"• Всего каналов: {total_channels}\n"
             message += f"• Проверено: {checked_channels}\n"
             message += f"• Новых сообщений: {new_messages}\n"
@@ -405,22 +398,22 @@ class TelegramNotifier:
             # Каналы с новыми сообщениями
             channels_with_updates = check_results.get('channels_with_updates', [])
             if channels_with_updates:
-                message += f"🆕 <b>Каналы с новыми сообщениями:</b>\n"
+                message += f"🆕 Каналы с новыми сообщениями:\n"
                 for channel_info in channels_with_updates:
                     channel_name = channel_info.get('channel', 'Неизвестно')
                     new_count = channel_info.get('new_messages', 0)
-                    message += f"• <b>{channel_name}</b>: {new_count} сообщений\n"
+                    message += f"• {channel_name}: {new_count} сообщений\n"
             else:
-                message += f"✅ <b>Новых сообщений не обнаружено</b>\n"
+                message += f"✅ Новых сообщений не обнаружено\n"
             
             # Время проверки
             check_duration = check_results.get('check_duration', 0)
             if check_duration > 0:
-                message += f"\n⏱️ <b>Время проверки:</b> {check_duration:.1f}с\n"
+                message += f"\n⏱️ Время проверки: {check_duration:.1f}с\n"
             
             # Следующая проверка
             check_interval = check_results.get('check_interval', 30)
-            message += f"🔄 <b>Следующая проверка:</b> через {check_interval} секунд"
+            message += f"🔄 Следующая проверка: через {check_interval} секунд"
             
             return message
             

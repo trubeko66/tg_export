@@ -546,7 +546,6 @@ class SettingsMethods:
             data = {
                 'chat_id': config.bot.chat_id,
                 'text': '🧪 Тестовое сообщение от Telegram Channel Exporter',
-                'parse_mode': 'HTML',
                 'disable_web_page_preview': True
             }
             
