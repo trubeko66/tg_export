@@ -129,17 +129,23 @@ class TelegramNotifier:
             message = f"🆕 <b>Новый канал добавлен в экспорт</b>\n\n"
             message += f"📺 <b>Название:</b> {channel.title}\n"
             
-            if channel.username:
+            if hasattr(channel, 'username') and channel.username:
                 message += f"🔗 <b>Username:</b> @{channel.username}\n"
             
-            if channel.id:
+            if hasattr(channel, 'id') and channel.id:
                 message += f"🆔 <b>ID:</b> {channel.id}\n"
             
-            if channel.description:
+            if hasattr(channel, 'description') and channel.description:
                 message += f"📝 <b>Описание:</b> {channel.description[:200]}...\n"
             
-            if channel.subscribers_count:
+            if hasattr(channel, 'subscribers_count') and channel.subscribers_count:
                 message += f"👥 <b>Подписчиков:</b> {channel.subscribers_count:,}\n"
+            
+            if hasattr(channel, 'total_messages') and channel.total_messages:
+                message += f"💬 <b>Сообщений:</b> {channel.total_messages:,}\n"
+            
+            if hasattr(channel, 'media_size_mb') and channel.media_size_mb:
+                message += f"📁 <b>Размер медиа:</b> {channel.media_size_mb:.1f} МБ\n"
             
             message += f"\n⏰ <b>Время добавления:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             message += f"🔄 <b>Статус:</b> Ожидает экспорта"
@@ -206,10 +212,22 @@ class TelegramNotifier:
         try:
             config = self.config_manager.config
             
+            # Проверяем настройки
+            if not config.bot.token:
+                self.console.print("[red]❌ Токен бота не настроен[/red]")
+                return False
+            
+            if not config.bot.chat_id:
+                self.console.print("[red]❌ Chat ID не настроен[/red]")
+                return False
+            
+            # Очищаем сообщение от потенциально проблемных символов
+            clean_message = self._clean_message_for_telegram(message)
+            
             url = f"https://api.telegram.org/bot{config.bot.token}/sendMessage"
             data = {
                 'chat_id': config.bot.chat_id,
-                'text': message,
+                'text': clean_message,
                 'parse_mode': 'HTML',
                 'disable_web_page_preview': True
             }
@@ -219,7 +237,9 @@ class TelegramNotifier:
             if response.status_code == 200:
                 return True
             else:
-                self.console.print(f"[red]❌ HTTP {response.status_code}: {response.text}[/red]")
+                # Детальная обработка ошибок
+                error_info = self._parse_telegram_error(response)
+                self.console.print(f"[red]❌ HTTP {response.status_code}: {error_info}[/red]")
                 return False
                 
         except requests.exceptions.Timeout:
@@ -231,6 +251,57 @@ class TelegramNotifier:
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка отправки сообщения: {e}[/red]")
             return False
+    
+    def _clean_message_for_telegram(self, message: str) -> str:
+        """Очистка сообщения для отправки в Telegram"""
+        try:
+            # Убираем потенциально проблемные символы
+            clean_message = message
+            
+            # Заменяем недопустимые HTML символы
+            clean_message = clean_message.replace('&', '&amp;')
+            clean_message = clean_message.replace('<', '&lt;')
+            clean_message = clean_message.replace('>', '&gt;')
+            
+            # Ограничиваем длину сообщения (Telegram лимит 4096 символов)
+            if len(clean_message) > 4000:
+                clean_message = clean_message[:4000] + "\n\n... (сообщение обрезано)"
+            
+            return clean_message
+            
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️ Ошибка очистки сообщения: {e}[/yellow]")
+            return message[:4000] if len(message) > 4000 else message
+    
+    def _parse_telegram_error(self, response) -> str:
+        """Парсинг ошибки от Telegram API"""
+        try:
+            import json
+            error_data = response.json()
+            
+            if 'description' in error_data:
+                error_desc = error_data['description']
+                
+                # Специальная обработка для частых ошибок
+                if 'chat not found' in error_desc.lower():
+                    return "Чат не найден. Проверьте Chat ID и убедитесь, что бот добавлен в чат."
+                elif 'bot was blocked' in error_desc.lower():
+                    return "Бот заблокирован пользователем. Разблокируйте бота в чате."
+                elif 'invalid token' in error_desc.lower():
+                    return "Неверный токен бота. Проверьте токен в настройках."
+                elif 'chat_id is empty' in error_desc.lower():
+                    return "Chat ID не указан. Настройте Chat ID в настройках бота."
+                elif 'message is too long' in error_desc.lower():
+                    return "Сообщение слишком длинное. Попробуйте сократить текст."
+                elif 'parse_mode' in error_desc.lower():
+                    return "Ошибка форматирования HTML. Проверьте теги в сообщении."
+                else:
+                    return error_desc
+            else:
+                return f"Неизвестная ошибка: {response.text}"
+                
+        except Exception as e:
+            return f"Ошибка парсинга ответа: {response.text}"
     
     def _save_report_to_log(self, report_data: dict):
         """Сохранение отчета в лог файл"""

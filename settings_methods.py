@@ -512,11 +512,30 @@ class SettingsMethods:
         
         config = self.config_manager.config
         
-        if not config.bot.token or not config.bot.chat_id:
-            self.console.print("[red]❌ Bot не настроен[/red]")
+        # Детальная проверка настроек
+        if not config.bot.token:
+            self.console.print("[red]❌ Токен бота не настроен[/red]")
+            self.console.print("Настройте токен бота в настройках")
             input("Нажмите Enter для продолжения...")
             return
         
+        if not config.bot.chat_id:
+            self.console.print("[red]❌ Chat ID не настроен[/red]")
+            self.console.print("Настройте Chat ID в настройках")
+            input("Нажмите Enter для продолжения...")
+            return
+        
+        # Показываем текущие настройки
+        settings_panel = Panel(
+            f"🤖 <b>Настройки бота:</b>\n"
+            f"🔑 <b>Токен:</b> {config.bot.token[:10]}...{config.bot.token[-5:]}\n"
+            f"💬 <b>Chat ID:</b> {config.bot.chat_id}\n"
+            f"🔔 <b>Уведомления:</b> {'Включены' if config.bot.notifications else 'Отключены'}",
+            title="📋 Текущие настройки",
+            border_style="blue"
+        )
+        
+        self.console.print(settings_panel)
         self.console.print("[blue]🧪 Тестирование бота...[/blue]")
         
         try:
@@ -526,7 +545,9 @@ class SettingsMethods:
             url = f"https://api.telegram.org/bot{config.bot.token}/sendMessage"
             data = {
                 'chat_id': config.bot.chat_id,
-                'text': '🧪 Тестовое сообщение от Telegram Channel Exporter'
+                'text': '🧪 Тестовое сообщение от Telegram Channel Exporter',
+                'parse_mode': 'HTML',
+                'disable_web_page_preview': True
             }
             
             response = requests.post(url, data=data, timeout=10)
@@ -534,12 +555,45 @@ class SettingsMethods:
             if response.status_code == 200:
                 self.console.print("[green]✅ Тестовое сообщение отправлено успешно[/green]")
             else:
+                # Детальная обработка ошибок
+                error_info = self._parse_telegram_error(response)
                 self.console.print(f"[red]❌ Ошибка отправки: {response.status_code}[/red]")
+                self.console.print(f"[red]❌ {error_info}[/red]")
                 
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка тестирования бота: {e}[/red]")
         
         input("\nНажмите Enter для продолжения...")
+    
+    def _parse_telegram_error(self, response) -> str:
+        """Парсинг ошибки от Telegram API"""
+        try:
+            import json
+            error_data = response.json()
+            
+            if 'description' in error_data:
+                error_desc = error_data['description']
+                
+                # Специальная обработка для частых ошибок
+                if 'chat not found' in error_desc.lower():
+                    return "Чат не найден. Проверьте Chat ID и убедитесь, что бот добавлен в чат."
+                elif 'bot was blocked' in error_desc.lower():
+                    return "Бот заблокирован пользователем. Разблокируйте бота в чате."
+                elif 'invalid token' in error_desc.lower():
+                    return "Неверный токен бота. Проверьте токен в настройках."
+                elif 'chat_id is empty' in error_desc.lower():
+                    return "Chat ID не указан. Настройте Chat ID в настройках бота."
+                elif 'message is too long' in error_desc.lower():
+                    return "Сообщение слишком длинное. Попробуйте сократить текст."
+                elif 'parse_mode' in error_desc.lower():
+                    return "Ошибка форматирования HTML. Проверьте теги в сообщении."
+                else:
+                    return error_desc
+            else:
+                return f"Неизвестная ошибка: {response.text}"
+                
+        except Exception as e:
+            return f"Ошибка парсинга ответа: {response.text}"
     
     async def test_webdav(self):
         """Тест WebDAV"""
