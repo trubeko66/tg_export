@@ -34,7 +34,7 @@ class ContinuousExporter:
         self.console = console
         self.config_manager = ConfigManager()
         self.content_filter = ContentFilter()
-        self.telegram_notifier = TelegramNotifier(console)  # Уведомления в Telegram
+        self.telegram_notifier = TelegramNotifier(console)
         self.exporter = None
         self.channels = []
         self.is_running = False
@@ -50,6 +50,8 @@ class ContinuousExporter:
             'errors': 0
         }
         self.channel_new_messages = {}  # Словарь для хранения новых сообщений по каналам
+        self.channel_filtered_messages = {}  # Словарь для отслеживания отфильтрованных сообщений по каналам
+        self.channel_useful_messages = {}  # Словарь для отслеживания полезных сообщений по каналам
         self.check_interval = 30  # Интервал проверки в секундах (по умолчанию 30)
         
         # Настройка обработчика сигналов для корректного завершения
@@ -631,10 +633,7 @@ class ContinuousExporter:
         
         # Следующая проверка
         stats_text.append("\n🔄 Следующая проверка\n\n", style="bold yellow")
-        if countdown > 0:
-            stats_text.append(f"⏰ Через {countdown} секунд\n", style="bold red")
-        else:
-            stats_text.append(f"⏰ Через {self.check_interval} секунд\n", style="blue")
+        stats_text.append(f"⏰ Через {self.check_interval} секунд\n", style="blue")
         
         return stats_text
     
@@ -664,15 +663,18 @@ class ContinuousExporter:
                 self.last_check_times[channel.id] = datetime.now()
                 
                 # Проверяем канал на новые сообщения
-                new_messages = await self._check_single_channel(channel)
+                useful_messages, filtered_messages = await self._check_single_channel(channel)
                 
-                # Сохраняем количество новых сообщений для канала
-                self.channel_new_messages[channel.id] = new_messages
+                # Сохраняем количество сообщений для канала
+                self.channel_new_messages[channel.id] = useful_messages + filtered_messages
+                self.channel_useful_messages[channel.id] = useful_messages
+                self.channel_filtered_messages[channel.id] = filtered_messages
                 
                 # Обновляем статистику
                 self.export_stats['checked_channels'] += 1
-                if new_messages > 0:
-                    self.export_stats['new_messages'] += new_messages
+                if useful_messages > 0 or filtered_messages > 0:
+                    self.export_stats['new_messages'] += useful_messages + filtered_messages
+                    self.export_stats['filtered_messages'] += filtered_messages
                 
                 # Небольшая пауза между каналами
                 await asyncio.sleep(0.5)
@@ -687,7 +689,7 @@ class ContinuousExporter:
             self.console.print(f"[red]❌ Ошибка проверки каналов: {e}[/red]")
             self.export_stats['errors'] += 1
     
-    async def _check_single_channel(self, channel: ChannelInfo) -> int:
+    async def _check_single_channel(self, channel: ChannelInfo) -> tuple:
         """Проверка одного канала на новые сообщения"""
         try:
             # Если Telegram не подключен, работаем в демо-режиме
@@ -699,8 +701,12 @@ class ContinuousExporter:
                     # Обновляем информацию о канале
                     channel.last_message_id += 1
                     channel.last_check = datetime.now().isoformat()
-                    return 1
-                return 0
+                    # Симулируем фильтрацию: 70% полезных, 30% отфильтрованных
+                    total_messages = 1
+                    useful_messages = int(total_messages * 0.7)
+                    filtered_messages = total_messages - useful_messages
+                    return (useful_messages, filtered_messages)
+                return (0, 0)
             
             # Реальная проверка через Telegram API
             try:
@@ -711,12 +717,30 @@ class ContinuousExporter:
                     last_message = messages[0]
                     if last_message.id > channel.last_message_id:
                         new_messages_count = last_message.id - channel.last_message_id
+                        
+                        # Применяем фильтрацию к новым сообщениям
+                        useful_messages = 0
+                        filtered_messages = 0
+                        
+                        # Получаем новые сообщения для фильтрации
+                        new_messages = await self.exporter.client.get_messages(
+                            entity, 
+                            min_id=channel.last_message_id,
+                            limit=new_messages_count
+                        )
+                        
+                        for message in new_messages:
+                            if self.content_filter.should_filter_message(message):
+                                filtered_messages += 1
+                            else:
+                                useful_messages += 1
+                        
                         # Обновляем информацию о канале
                         channel.last_message_id = last_message.id
                         channel.last_check = datetime.now().isoformat()
-                        return new_messages_count
+                        return (useful_messages, filtered_messages)
                 
-                return 0
+                return (0, 0)
                 
             except Exception as e:
                 # Если не удалось получить сообщения, симулируем проверку
@@ -726,13 +750,17 @@ class ContinuousExporter:
                 if channel.id % 5 == 0:
                     channel.last_message_id += 1
                     channel.last_check = datetime.now().isoformat()
-                    return 1
-                return 0
+                    # Симулируем фильтрацию: 70% полезных, 30% отфильтрованных
+                    total_messages = 1
+                    useful_messages = int(total_messages * 0.7)
+                    filtered_messages = total_messages - useful_messages
+                    return (useful_messages, filtered_messages)
+                return (0, 0)
                 
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка проверки канала {channel.title}: {e}[/red]")
             self.export_stats['errors'] += 1
-            return 0
+            return (0, 0)
     
     async def _cleanup(self):
         """Очистка ресурсов при завершении"""
@@ -747,29 +775,49 @@ class ContinuousExporter:
     async def _send_check_summary(self):
         """Отправка сводки по завершении проверки каналов"""
         try:
+            # Не отправляем уведомления при выходе из программы
+            if self.should_stop:
+                return
             # Подготавливаем данные для сводки
             check_duration = (datetime.now() - self._last_check_time).total_seconds() if hasattr(self, '_last_check_time') else 0
             
             # Собираем каналы с новыми сообщениями
             channels_with_updates = []
-            total_new_messages = 0
+            total_useful_messages = 0
+            total_filtered_messages = 0
             channels_with_messages = 0
             
             for channel in self.channels:
-                new_messages = self.channel_new_messages.get(channel.id, 0)
-                if new_messages > 0:
-                    channels_with_updates.append({
+                useful_messages = self.channel_useful_messages.get(channel.id, 0)
+                filtered_messages = self.channel_filtered_messages.get(channel.id, 0)
+                total_messages = useful_messages + filtered_messages
+                
+                if total_messages > 0:
+                    channel_info = {
                         'channel': channel.title,
-                        'new_messages': new_messages
-                    })
-                    total_new_messages += new_messages
+                        'new_messages': total_messages
+                    }
+                    
+                    # Добавляем информацию о полезных сообщениях только если они есть
+                    if useful_messages > 0:
+                        channel_info['useful_messages'] = useful_messages
+                    
+                    # Добавляем информацию об отфильтрованных сообщениях только если они есть
+                    if filtered_messages > 0:
+                        channel_info['filtered_messages'] = filtered_messages
+                    
+                    channels_with_updates.append(channel_info)
+                    total_useful_messages += useful_messages
+                    total_filtered_messages += filtered_messages
                     channels_with_messages += 1
             
             # Формируем данные сводки
             check_results = {
                 'total_channels': len(self.channels),
                 'checked_channels': len(self.channels),
-                'new_messages': total_new_messages,
+                'new_messages': total_useful_messages + total_filtered_messages,
+                'useful_messages': total_useful_messages,
+                'filtered_messages': total_filtered_messages,
                 'channels_with_messages': channels_with_messages,
                 'channels_with_updates': channels_with_updates,
                 'check_duration': check_duration,

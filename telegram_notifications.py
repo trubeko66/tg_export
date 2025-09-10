@@ -387,12 +387,23 @@ class TelegramNotifier:
             total_channels = check_results.get('total_channels', 0)
             checked_channels = check_results.get('checked_channels', 0)
             new_messages = check_results.get('new_messages', 0)
+            useful_messages = check_results.get('useful_messages', 0)
+            filtered_messages = check_results.get('filtered_messages', 0)
             channels_with_messages = check_results.get('channels_with_messages', 0)
             
             message += f"📊 Статистика проверки:\n"
             message += f"• Всего каналов: {total_channels}\n"
             message += f"• Проверено: {checked_channels}\n"
             message += f"• Новых сообщений: {new_messages}\n"
+            
+            # Показываем полезные сообщения только если они есть
+            if useful_messages > 0:
+                message += f"• Полезных сообщений: {useful_messages}\n"
+            
+            # Показываем отфильтрованные сообщения только если они есть
+            if filtered_messages > 0:
+                message += f"• Отфильтровано: {filtered_messages}\n"
+            
             message += f"• Каналов с обновлениями: {channels_with_messages}\n\n"
             
             # Каналы с новыми сообщениями
@@ -402,7 +413,22 @@ class TelegramNotifier:
                 for channel_info in channels_with_updates:
                     channel_name = channel_info.get('channel', 'Неизвестно')
                     new_count = channel_info.get('new_messages', 0)
-                    message += f"• {channel_name}: {new_count} сообщений\n"
+                    useful_count = channel_info.get('useful_messages', 0)
+                    filtered_count = channel_info.get('filtered_messages', 0)
+                    
+                    message += f"• {channel_name}: {new_count} сообщений"
+                    
+                    # Добавляем детализацию только если есть полезные или отфильтрованные сообщения
+                    details = []
+                    if useful_count > 0:
+                        details.append(f"{useful_count} полезных")
+                    if filtered_count > 0:
+                        details.append(f"{filtered_count} отфильтровано")
+                    
+                    if details:
+                        message += f" ({', '.join(details)})"
+                    
+                    message += "\n"
             else:
                 message += f"✅ Новых сообщений не обнаружено\n"
             
