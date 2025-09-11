@@ -821,6 +821,9 @@ class ContinuousExporter:
                             # Простая фильтрация как в рабочем коммите
                             should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
                             
+                            # Отладочная информация
+                            self.filter_logger.debug(f"Processing message ID {message_id} from {channel.title}: should_filter={should_filter}, reason='{filter_reason}'")
+                            
                             if should_filter:
                                 filtered_messages += 1
                                 date_info = f" от {message_date}" if message_date else ""
@@ -896,19 +899,29 @@ class ContinuousExporter:
     
     def _log_filtered_message(self, channel_title: str, message_date: str, message_text: str, filter_reason: str, message_id: str = ""):
         """Логирование отфильтрованных сообщений в ads.log"""
-        # Получаем 2-3 первых предложения
-        sentences = message_text.split('. ')
-        first_sentences = '. '.join(sentences[:3])
-        if len(sentences) > 3:
-            first_sentences += "..."
-        
-        # Проверяем filter_reason
-        if not filter_reason or filter_reason.strip() == "":
-            filter_reason = "Причина не указана"
-        
-        # Запись в лог с указанием фильтра и первых предложений
-        log_entry = f"ОТФИЛЬТРОВАНО | Канал: {channel_title} | Дата: {message_date} | ID: {message_id} | Фильтр: {filter_reason} | Текст: {first_sentences}"
-        self.filter_logger.info(log_entry)
+        try:
+            # Получаем 2-3 первых предложения
+            sentences = message_text.split('. ')
+            first_sentences = '. '.join(sentences[:3])
+            if len(sentences) > 3:
+                first_sentences += "..."
+            
+            # Проверяем filter_reason
+            if not filter_reason or filter_reason.strip() == "":
+                filter_reason = "Причина не указана"
+            
+            # Запись в лог с указанием фильтра и первых предложений
+            log_entry = f"ОТФИЛЬТРОВАНО | Канал: {channel_title} | Дата: {message_date} | ID: {message_id} | Фильтр: {filter_reason} | Текст: {first_sentences}"
+            
+            # Проверяем, что логгер существует
+            if hasattr(self, 'filter_logger') and self.filter_logger:
+                self.filter_logger.info(log_entry)
+                self.console.print(f"[dim]📝 Записано в лог: {log_entry}[/dim]")
+            else:
+                self.console.print(f"[red]❌ Логгер не инициализирован! Запись: {log_entry}[/red]")
+                
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка логирования: {e}[/red]")
     
     def _log_passed_message(self, channel_title: str, message_date: str, message_text: str, message_id: str = ""):
         """Логирование сообщений, прошедших фильтр"""
