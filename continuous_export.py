@@ -724,7 +724,10 @@ class ContinuousExporter:
                 elif useful_messages == 0 and filtered_messages > 0:
                     mode = "демо-режим" if not self.telegram_connected else "реальный режим"
                     self.console.print(f"[dim]ℹ️ В {channel.title} найдены {filtered_messages} сообщений, но все отфильтрованы ({mode})[/dim]")
-                    self.console.print(f"[dim]   💡 Проверьте детальную информацию выше для понимания причин фильтрации[/dim]")
+                    self.console.print(f"[dim]   💡 Проверьте файл ads.log для детальной информации о причинах фильтрации[/dim]")
+                    
+                    # Логируем общую информацию о канале
+                    self.filter_logger.info(f"CHANNEL_SUMMARY: {channel.title} - найдено {filtered_messages} сообщений, все отфильтрованы ({mode})")
                 
                 # Обновляем статистику
                 self.export_stats['checked_channels'] += 1
@@ -822,6 +825,7 @@ class ContinuousExporter:
                                 filtered_messages += 1
                                 date_info = f" от {message_date}" if message_date else ""
                                 self.console.print(f"[red]❌ ОТФИЛЬТРОВАНО: {channel.title}{date_info} - {filter_reason}[/red]")
+                                self.console.print(f"[dim]📝 Текст: {message_text[:100]}...[/dim]")
                                 
                                 # Логируем отфильтрованное сообщение
                                 self._log_filtered_message(channel.title, message_date, message_text, filter_reason, message_id)
@@ -829,6 +833,7 @@ class ContinuousExporter:
                                 useful_messages += 1
                                 date_info = f" от {message_date}" if message_date else ""
                                 self.console.print(f"[green]✅ ПРИНЯТО: {channel.title}{date_info}[/green]")
+                                self.console.print(f"[dim]📝 Текст: {message_text[:100]}...[/dim]")
                                 
                                 # Логируем прошедшее сообщение
                                 self._log_passed_message(channel.title, message_date, message_text, message_id)
