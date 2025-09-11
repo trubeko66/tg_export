@@ -38,22 +38,33 @@ class MessageDetector:
                 self.logger.debug(f"Channel directory not found: {channel_dir}")
                 return None
             
-            # Ищем MD файл
-            md_file = channel_dir / f"{sanitized_title}.md"
-            if md_file.exists():
-                return self._extract_last_id_from_markdown(md_file)
+            # Список файлов для проверки в порядке приоритета
+            files_to_check = [
+                (channel_dir / f"{sanitized_title}.md", self._extract_last_id_from_markdown),
+                (channel_dir / f"{sanitized_title}.json", self._extract_last_id_from_json),
+                (channel_dir / f"{sanitized_title}.html", self._extract_last_id_from_html)
+            ]
             
-            # Ищем JSON файл
-            json_file = channel_dir / f"{sanitized_title}.json"
-            if json_file.exists():
-                return self._extract_last_id_from_json(json_file)
+            max_id = None
             
-            # Ищем HTML файл
-            html_file = channel_dir / f"{sanitized_title}.html"
-            if html_file.exists():
-                return self._extract_last_id_from_html(html_file)
+            # Проверяем все файлы и берем максимальный ID
+            for file_path, extract_func in files_to_check:
+                if file_path.exists():
+                    try:
+                        file_id = extract_func(file_path)
+                        if file_id is not None:
+                            if max_id is None or file_id > max_id:
+                                max_id = file_id
+                                self.logger.debug(f"Found higher ID {max_id} in {file_path.name}")
+                    except Exception as e:
+                        self.logger.warning(f"Error extracting ID from {file_path}: {e}")
+                        continue
             
-            self.logger.debug(f"No export files found for channel: {channel_name}")
+            if max_id is not None:
+                self.logger.debug(f"Final last message ID for {channel_name}: {max_id}")
+                return max_id
+            
+            self.logger.debug(f"No valid message IDs found for channel: {channel_name}")
             return None
             
         except Exception as e:
@@ -83,6 +94,24 @@ class MessageDetector:
             if matches2:
                 max_id = max(int(match) for match in matches2)
                 self.logger.debug(f"Found last message ID {max_id} in Markdown file (pattern2): {md_file}")
+                return max_id
+            
+            # Дополнительный паттерн: ID: 12345 (без скобок)
+            pattern3 = r'ID:\s*(\d+)'
+            matches3 = re.findall(pattern3, content)
+            
+            if matches3:
+                max_id = max(int(match) for match in matches3)
+                self.logger.debug(f"Found last message ID {max_id} in Markdown file (pattern3): {md_file}")
+                return max_id
+            
+            # Еще один паттерн: Message ID: 12345
+            pattern4 = r'Message ID:\s*(\d+)'
+            matches4 = re.findall(pattern4, content)
+            
+            if matches4:
+                max_id = max(int(match) for match in matches4)
+                self.logger.debug(f"Found last message ID {max_id} in Markdown file (pattern4): {md_file}")
                 return max_id
             
             self.logger.debug(f"No message IDs found in Markdown file: {md_file}")

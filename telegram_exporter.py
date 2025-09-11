@@ -1819,7 +1819,20 @@ class TelegramExporter:
             self.logger.info(f"Поиск сообщений в канале {channel.title} после ID {min_id}")
             
             # Получаем только новые сообщения
-            async for message in self.client.iter_messages(entity, min_id=min_id):
+            try:
+                # Используем offset_id для получения сообщений после определенного ID
+                messages = await self.client.get_messages(entity, offset_id=min_id, limit=100)
+                # Фильтруем только действительно новые сообщения
+                messages = [msg for msg in messages if msg.id > min_id]
+            except Exception as e:
+                self.logger.warning(f"Failed to get messages with offset_id for {channel.title}: {e}")
+                # Альтернативный метод: получаем последние сообщения
+                messages = await self.client.get_messages(entity, limit=50)
+                # Фильтруем только новые сообщения
+                messages = [msg for msg in messages if msg.id > min_id]
+            
+            # Обрабатываем полученные сообщения
+            for message in messages:
                 try:
                     # Фильтрация рекламных и промо-сообщений
                     should_filter, filter_reason = self.content_filter.should_filter_message(message.text or "")
@@ -1863,10 +1876,6 @@ class TelegramExporter:
                     )
                     
                     new_messages.append(msg_data)
-                    
-                    # Обновляем последний ID сообщения
-                    if message.id > channel.last_message_id:
-                        channel.last_message_id = message.id
                         
                 except Exception as e:
                     self.logger.error(f"Ошибка обработки сообщения {message.id}: {e}")
@@ -1885,6 +1894,12 @@ class TelegramExporter:
                 
                 if md_file and Path(md_file).exists():
                     self.logger.info(f"Успешно добавлено {len(new_messages)} сообщений в MD файл для канала {channel.title}")
+                    
+                    # Обновляем последний ID сообщения на максимальный из новых сообщений
+                    if new_messages:
+                        max_message_id = max(msg.id for msg in new_messages)
+                        if max_message_id > channel.last_message_id:
+                            channel.last_message_id = max_message_id
                     
                     # Обновляем статистику канала
                     channel.total_messages += len(new_messages)
