@@ -91,13 +91,17 @@ class ContentFilter:
             for marker in self.ad_markers:
                 if marker in text_lower:
                     self.filtered_count += 1
-                    return True, f"Реклама (найдено: '{marker}')"
+                    reason = f"Реклама (найдено: '{marker}')"
+                    print(f"DEBUG: Found ad marker '{marker}' in text: {text[:100]}...")
+                    return True, reason
         
         # Проверка на школы и их промо-мероприятия/материалы
         if self.config.filter_schools:
             contains_school = any(school in text_lower for school in self.school_keywords)
             contains_event = any(event in text_lower for event in self.event_keywords)
             contains_promo = any(promo in text_lower for promo in self.promo_keywords)
+
+            print(f"DEBUG: School check - contains_school: {contains_school}, contains_event: {contains_event}, contains_promo: {contains_promo}")
 
             # Детальная отладка
             if contains_school:
@@ -106,9 +110,15 @@ class ContentFilter:
                     found_events = [event for event in self.event_keywords if event in text_lower]
                     found_promos = [promo for promo in self.promo_keywords if promo in text_lower]
                     self.filtered_count += 1
-                    return True, f"Промо ИТ‑школы/мероприятие (школы: {found_schools}, события: {found_events}, промо: {found_promos})"
+                    reason = f"Промо ИТ‑школы/мероприятие (школы: {found_schools}, события: {found_events}, промо: {found_promos})"
+                    print(f"DEBUG: Filtering school promo - reason: {reason}")
+                    return True, reason
                 else:
                     # Есть школа, но нет промо/событий - не фильтруем
-                    return False, f"Упоминание школы без промо (школы: {found_schools})"
+                    reason = f"Упоминание школы без промо (школы: {found_schools})"
+                    print(f"DEBUG: School mentioned but no promo - reason: {reason}")
+                    return False, reason
         
-        return False, "Сообщение прошло все фильтры"
+        reason = "Сообщение прошло все фильтры"
+        print(f"DEBUG: Message passed all filters - reason: {reason}")
+        return False, reason

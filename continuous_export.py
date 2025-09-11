@@ -821,9 +821,18 @@ class ContinuousExporter:
                             
                             should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
                             
+                            # Дополнительная отладка в основном цикле
+                            self.filter_logger.debug(f"Main loop filter result: should_filter={should_filter}, reason='{filter_reason}'")
+                            
                             if should_filter:
                                 filtered_messages += 1
                                 date_info = f" от {message_date}" if message_date else ""
+                                
+                                # Проверяем filter_reason в основном цикле
+                                if not filter_reason or filter_reason.strip() == "":
+                                    self.filter_logger.error(f"CRITICAL: Empty filter_reason in main loop! Channel: {channel.title}, Message ID: {message_id}")
+                                    filter_reason = "ОШИБКА: Причина фильтрации не определена"
+                                
                                 self.console.print(f"[red]❌ ОТФИЛЬТРОВАНО: {channel.title}{date_info} - {filter_reason}[/red]")
                                 
                                 # Используем специальное логирование для отфильтрованных сообщений
@@ -893,6 +902,11 @@ class ContinuousExporter:
         # Обрезаем текст до 200 символов
         truncated_text = message_text[:200] + "..." if len(message_text) > 200 else message_text
         
+        # Проверяем и обрабатываем filter_reason
+        if not filter_reason or filter_reason.strip() == "":
+            filter_reason = "Причина не указана"
+            self.filter_logger.warning(f"Empty filter_reason for message from {channel_title}, ID: {message_id}")
+        
         # Формируем структурированную запись
         log_entry = f"FILTERED_MESSAGE | Channel: {channel_title} | Date: {message_date} | ID: {message_id} | Reason: {filter_reason} | Text: {truncated_text}"
         
@@ -901,6 +915,9 @@ class ContinuousExporter:
         
         # Дополнительно логируем с уровнем DEBUG для полной информации
         self.filter_logger.debug(f"Full filtered message details - Channel: {channel_title}, Date: {message_date}, ID: {message_id}, Reason: {filter_reason}, Full text: {message_text}")
+        
+        # Дополнительная отладка для диагностики
+        self.filter_logger.debug(f"Filter reason debug - Original reason: '{filter_reason}', Length: {len(filter_reason)}, Type: {type(filter_reason)}")
     
     def _log_passed_message(self, channel_title: str, message_date: str, message_text: str, message_id: str = ""):
         """Логирование сообщений, прошедших фильтр"""
@@ -925,7 +942,14 @@ class ContinuousExporter:
         should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
         date_info = f" от {message_date}" if message_date else ""
         
+        # Детальная отладка результата фильтрации
         self.filter_logger.debug(f"Filter result: should_filter={should_filter}, reason='{filter_reason}'")
+        self.filter_logger.debug(f"Filter reason details - Value: '{filter_reason}', Length: {len(filter_reason) if filter_reason else 0}, Type: {type(filter_reason)}")
+        
+        # Проверяем, что filter_reason не пустой
+        if should_filter and (not filter_reason or filter_reason.strip() == ""):
+            self.filter_logger.error(f"CRITICAL: Message should be filtered but filter_reason is empty! Channel: {channel_title}, Text: {message_text[:100]}")
+            filter_reason = "ОШИБКА: Причина фильтрации не определена"
         
         if should_filter:
             self.console.print(f"[yellow]🔍 ФИЛЬТРАЦИЯ: {channel_title}{date_info} - {filter_reason}[/yellow]")
@@ -973,6 +997,9 @@ class ContinuousExporter:
                 
                 should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
                 
+                # Дополнительная отладка в функции экспорта
+                self.filter_logger.debug(f"Export filter result: should_filter={should_filter}, reason='{filter_reason}'")
+                
                 if not should_filter:
                     new_messages.append(message)
                     self.filter_logger.debug(f"Message ID {message_id} added to export queue")
@@ -981,6 +1008,12 @@ class ContinuousExporter:
                         break  # Останавливаемся когда набрали нужное количество
                 else:
                     date_info = f" от {message_date}" if message_date else ""
+                    
+                    # Проверяем filter_reason в функции экспорта
+                    if not filter_reason or filter_reason.strip() == "":
+                        self.filter_logger.error(f"CRITICAL: Empty filter_reason in export! Channel: {channel.title}, Message ID: {message_id}")
+                        filter_reason = "ОШИБКА: Причина фильтрации не определена"
+                    
                     self.console.print(f"[dim]🔍 Сообщение отфильтровано при экспорте{date_info}: {filter_reason}[/dim]")
                     
                     # Используем специальное логирование для отфильтрованных сообщений при экспорте
