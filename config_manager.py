@@ -137,9 +137,15 @@ class ConfigManager:
     
     def is_bot_configured(self) -> bool:
         """Проверка настройки бота"""
-        return (self.config.bot.enabled and 
-                self.config.bot.token and 
-                self.config.bot.chat_id)
+        has_token_and_chat = (self.config.bot.token and 
+                             self.config.bot.chat_id)
+        
+        # Если токен и chat_id настроены, но enabled = False, автоматически включаем
+        if has_token_and_chat and not self.config.bot.enabled:
+            self.config.bot.enabled = True
+            self.save_config()
+        
+        return has_token_and_chat
     
     def setup_telegram_config(self, force_setup: bool = False):
         """Настройка конфигурации Telegram API"""
@@ -567,3 +573,64 @@ class ConfigManager:
     def channels_file_exists(self) -> bool:
         """Проверить существование файла каналов"""
         return Path(self.get_channels_file_path()).exists()
+    
+    def update_channel_last_message_id(self, channel_id: int, last_message_id: int):
+        """Обновить last_message_id для канала в файле .channels"""
+        try:
+            file_path = self.get_channels_file_path()
+            if not Path(file_path).exists():
+                self.console.print(f"[yellow]⚠️ Файл {file_path} не найден[/yellow]")
+                return False
+            
+            # Загружаем текущие данные
+            with open(file_path, 'r', encoding='utf-8') as f:
+                channels_data = json.load(f)
+            
+            # Находим и обновляем канал
+            updated = False
+            for channel_data in channels_data:
+                if channel_data.get('id') == channel_id:
+                    channel_data['last_message_id'] = last_message_id
+                    updated = True
+                    break
+            
+            if updated:
+                # Сохраняем обновленные данные
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(channels_data, f, ensure_ascii=False, indent=2)
+                self.console.print(f"[green]✅ Обновлен last_message_id={last_message_id} для канала {channel_id}[/green]")
+                return True
+            else:
+                self.console.print(f"[yellow]⚠️ Канал {channel_id} не найден в файле[/yellow]")
+                return False
+                
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка обновления last_message_id: {e}[/red]")
+            return False
+    
+    def add_channel_to_file(self, channel_info: dict):
+        """Добавить канал в файл .channels"""
+        try:
+            channels_file = Path(self.get_channels_file_path())
+            
+            # Загружаем существующие каналы
+            existing_channels = []
+            if channels_file.exists():
+                with open(channels_file, 'r', encoding='utf-8') as f:
+                    existing_channels = json.load(f)
+            
+            # Проверяем, не существует ли уже канал с таким ID
+            channel_id = channel_info['id']
+            for existing_channel in existing_channels:
+                if existing_channel.get('id') == channel_id:
+                    raise ValueError(f"Канал с ID {channel_id} уже существует в файле")
+            
+            # Добавляем новый канал
+            existing_channels.append(channel_info)
+            
+            # Сохраняем обновленный список
+            with open(channels_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_channels, f, ensure_ascii=False, indent=2)
+            
+        except Exception as e:
+            raise Exception(f"Ошибка добавления канала в файл: {e}")
