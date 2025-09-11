@@ -806,44 +806,32 @@ class ContinuousExporter:
                             limit=new_messages_count
                         )
                         
-                        for message in new_messages:
-                            # Получаем текст сообщения для фильтрации
-                            message_text = getattr(message, 'text', '') or getattr(message, 'message', '') or ''
-                            
-                            # Получаем дату сообщения
-                            message_date = self._format_message_date(message)
-                            
-                            message_id = str(getattr(message, 'id', 'unknown'))
-                            self.filter_logger.debug(f"Processing message from {channel.title}, ID: {message_id}, date: {message_date}")
-                            
-                            # Тестируем фильтрацию для отладки
-                            self._test_message_filtering(message_text, channel.title, message_date, message_id)
-                            
-                            should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
-                            
-                            # Дополнительная отладка в основном цикле
-                            self.filter_logger.debug(f"Main loop filter result: should_filter={should_filter}, reason='{filter_reason}'")
-                            
-                            if should_filter:
-                                filtered_messages += 1
-                                date_info = f" от {message_date}" if message_date else ""
+                            for message in new_messages:
+                                # Получаем текст сообщения для фильтрации
+                                message_text = getattr(message, 'text', '') or getattr(message, 'message', '') or ''
                                 
-                                # Проверяем filter_reason в основном цикле
-                                if not filter_reason or filter_reason.strip() == "":
-                                    self.filter_logger.error(f"CRITICAL: Empty filter_reason in main loop! Channel: {channel.title}, Message ID: {message_id}")
-                                    filter_reason = "ОШИБКА: Причина фильтрации не определена"
+                                # Получаем дату сообщения
+                                message_date = self._format_message_date(message)
                                 
-                                self.console.print(f"[red]❌ ОТФИЛЬТРОВАНО: {channel.title}{date_info} - {filter_reason}[/red]")
+                                message_id = str(getattr(message, 'id', 'unknown'))
                                 
-                                # Используем специальное логирование для отфильтрованных сообщений
-                                self._log_filtered_message(channel.title, message_date, message_text, filter_reason, message_id)
-                            else:
-                                useful_messages += 1
-                                date_info = f" от {message_date}" if message_date else ""
-                                self.console.print(f"[green]✅ ПРИНЯТО: {channel.title}{date_info}[/green]")
+                                # Простая фильтрация как в рабочем коммите
+                                should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
                                 
-                                # Используем специальное логирование для прошедших сообщений
-                                self._log_passed_message(channel.title, message_date, message_text, message_id)
+                                if should_filter:
+                                    filtered_messages += 1
+                                    date_info = f" от {message_date}" if message_date else ""
+                                    self.console.print(f"[red]❌ ОТФИЛЬТРОВАНО: {channel.title}{date_info} - {filter_reason}[/red]")
+                                    
+                                    # Логируем отфильтрованное сообщение
+                                    self._log_filtered_message(channel.title, message_date, message_text, filter_reason, message_id)
+                                else:
+                                    useful_messages += 1
+                                    date_info = f" от {message_date}" if message_date else ""
+                                    self.console.print(f"[green]✅ ПРИНЯТО: {channel.title}{date_info}[/green]")
+                                    
+                                    # Логируем прошедшее сообщение
+                                    self._log_passed_message(channel.title, message_date, message_text, message_id)
                         
                         self.console.print(f"[cyan]📊 {channel.title}: полезных={useful_messages}, отфильтровано={filtered_messages}[/cyan]")
                         
@@ -898,70 +886,47 @@ class ContinuousExporter:
             return str(getattr(message, 'date', ''))
     
     def _log_filtered_message(self, channel_title: str, message_date: str, message_text: str, filter_reason: str, message_id: str = ""):
-        """Специальное логирование отфильтрованных сообщений в ads.log"""
+        """Логирование отфильтрованных сообщений в ads.log"""
         # Обрезаем текст до 200 символов
         truncated_text = message_text[:200] + "..." if len(message_text) > 200 else message_text
         
-        # Проверяем и обрабатываем filter_reason
+        # Проверяем filter_reason
         if not filter_reason or filter_reason.strip() == "":
             filter_reason = "Причина не указана"
-            self.filter_logger.warning(f"Empty filter_reason for message from {channel_title}, ID: {message_id}")
         
-        # Формируем структурированную запись
-        log_entry = f"FILTERED_MESSAGE | Channel: {channel_title} | Date: {message_date} | ID: {message_id} | Reason: {filter_reason} | Text: {truncated_text}"
-        
-        # Логируем с уровнем INFO для отфильтрованных сообщений
+        # Простая запись в лог
+        log_entry = f"ОТФИЛЬТРОВАНО | Канал: {channel_title} | Дата: {message_date} | ID: {message_id} | Причина: {filter_reason} | Текст: {truncated_text}"
         self.filter_logger.info(log_entry)
-        
-        # Дополнительно логируем с уровнем DEBUG для полной информации
-        self.filter_logger.debug(f"Full filtered message details - Channel: {channel_title}, Date: {message_date}, ID: {message_id}, Reason: {filter_reason}, Full text: {message_text}")
-        
-        # Дополнительная отладка для диагностики
-        self.filter_logger.debug(f"Filter reason debug - Original reason: '{filter_reason}', Length: {len(filter_reason)}, Type: {type(filter_reason)}")
     
     def _log_passed_message(self, channel_title: str, message_date: str, message_text: str, message_id: str = ""):
         """Логирование сообщений, прошедших фильтр"""
         # Обрезаем текст до 200 символов
         truncated_text = message_text[:200] + "..." if len(message_text) > 200 else message_text
         
-        # Формируем структурированную запись
-        log_entry = f"PASSED_MESSAGE | Channel: {channel_title} | Date: {message_date} | ID: {message_id} | Text: {truncated_text}"
-        
-        # Логируем с уровнем INFO
+        # Простая запись в лог
+        log_entry = f"ПРИНЯТО | Канал: {channel_title} | Дата: {message_date} | ID: {message_id} | Текст: {truncated_text}"
         self.filter_logger.info(log_entry)
     
     def _test_message_filtering(self, message_text: str, channel_title: str = "", message_date: str = "", message_id: str = "") -> None:
         """Тестирование фильтрации сообщения для отладки"""
-        self.filter_logger.debug(f"Testing message filtering for channel: {channel_title}, date: {message_date}, ID: {message_id}")
-        
         if not message_text or message_text.strip() == "":
             self.console.print(f"[yellow]⚠️ ПУСТОЕ СООБЩЕНИЕ в {channel_title}[/yellow]")
-            self.filter_logger.warning(f"Empty message detected in channel: {channel_title}")
             return
             
         should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
         date_info = f" от {message_date}" if message_date else ""
         
-        # Детальная отладка результата фильтрации
-        self.filter_logger.debug(f"Filter result: should_filter={should_filter}, reason='{filter_reason}'")
-        self.filter_logger.debug(f"Filter reason details - Value: '{filter_reason}', Length: {len(filter_reason) if filter_reason else 0}, Type: {type(filter_reason)}")
-        
-        # Проверяем, что filter_reason не пустой
-        if should_filter and (not filter_reason or filter_reason.strip() == ""):
-            self.filter_logger.error(f"CRITICAL: Message should be filtered but filter_reason is empty! Channel: {channel_title}, Text: {message_text[:100]}")
-            filter_reason = "ОШИБКА: Причина фильтрации не определена"
-        
         if should_filter:
-            self.console.print(f"[yellow]🔍 ФИЛЬТРАЦИЯ: {channel_title}{date_info} - {filter_reason}[/yellow]")
+            self.console.print(f"[red]❌ БУДЕТ ОТФИЛЬТРОВАНО: {channel_title}{date_info} - {filter_reason}[/red]")
             self.console.print(f"[dim]📝 Текст: {message_text[:200]}...[/dim]")
             
-            # Используем специальное логирование для отфильтрованных сообщений
+            # Логируем отфильтрованное сообщение
             self._log_filtered_message(channel_title, message_date, message_text, filter_reason, message_id)
         else:
             self.console.print(f"[green]✅ ПРОЙДЕТ ФИЛЬТР: {channel_title}{date_info}[/green]")
             self.console.print(f"[dim]📝 Текст: {message_text[:200]}...[/dim]")
             
-            # Используем специальное логирование для прошедших сообщений
+            # Логируем прошедшее сообщение
             self._log_passed_message(channel_title, message_date, message_text, message_id)
     
     async def _export_new_messages_to_md(self, channel: ChannelInfo, useful_messages_count: int):
