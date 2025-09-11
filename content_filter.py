@@ -68,11 +68,15 @@ class ContentFilter:
             'регистрация', 'зарегистрируйся', 'зарегистрируйтесь', 'записаться', 'приглашаем'
         }
 
-        # Промо-маркеры для образовательных предложений
+        # Промо-маркеры для образовательных предложений (более точные)
         self.promo_keywords = {
-            'курс', 'курсы', 'обучение', 'профессия', 'интенсив', 'марафон',
-            'набор', 'старт потока', 'старт курса', 'учись', 'стань разработчиком',
-            'гарантия трудоустройства', 'трудоустройство', 'ментор', 'портфолио'
+            'интенсив', 'марафон', 'набор', 'старт потока', 'старт курса', 
+            'учись', 'стань разработчиком', 'гарантия трудоустройства', 
+            'трудоустройство', 'ментор', 'портфолио', 'записаться на курс',
+            'записаться на обучение', 'записаться на интенсив', 'записаться на марафон',
+            'записаться на программу', 'записаться на поток', 'записаться на поток',
+            'записаться на курс', 'записаться на обучение', 'записаться на интенсив',
+            'записаться на марафон', 'записаться на программу', 'записаться на поток'
         }
     
     def should_filter_message(self, text: str) -> Tuple[bool, str]:
@@ -87,7 +91,7 @@ class ContentFilter:
             for marker in self.ad_markers:
                 if marker in text_lower:
                     self.filtered_count += 1
-                    return True, "Реклама"
+                    return True, f"Реклама (найдено: '{marker}')"
         
         # Проверка на школы и их промо-мероприятия/материалы
         if self.config.filter_schools:
@@ -98,6 +102,9 @@ class ContentFilter:
             # Фильтруем только если есть упоминание школы и это похоже на промо/мероприятие
             if contains_school and (contains_event or contains_promo):
                 self.filtered_count += 1
-                return True, "Промо ИТ‑школы/мероприятие"
+                found_schools = [school for school in self.school_keywords if school in text_lower]
+                found_events = [event for event in self.event_keywords if event in text_lower]
+                found_promos = [promo for promo in self.promo_keywords if promo in text_lower]
+                return True, f"Промо ИТ‑школы/мероприятие (школы: {found_schools}, события: {found_events}, промо: {found_promos})"
         
         return False, ""

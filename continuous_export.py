@@ -753,8 +753,17 @@ class ContinuousExporter:
                         )
                         
                         for message in new_messages:
-                            if self.content_filter.should_filter_message(message):
+                            # Получаем текст сообщения для фильтрации
+                            message_text = getattr(message, 'text', '') or getattr(message, 'message', '') or ''
+                            
+                            # Тестируем фильтрацию для отладки
+                            self._test_message_filtering(message_text)
+                            
+                            should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
+                            
+                            if should_filter:
                                 filtered_messages += 1
+                                self.console.print(f"[dim]🔍 Сообщение отфильтровано: {filter_reason}[/dim]")
                             else:
                                 useful_messages += 1
                         
@@ -792,6 +801,16 @@ class ContinuousExporter:
             self.export_stats['errors'] += 1
             return (0, 0)
     
+    def _test_message_filtering(self, message_text: str) -> None:
+        """Тестирование фильтрации сообщения для отладки"""
+        should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
+        if should_filter:
+            self.console.print(f"[yellow]🔍 ТЕСТ ФИЛЬТРАЦИИ: Сообщение будет отфильтровано - {filter_reason}[/yellow]")
+            self.console.print(f"[dim]Текст: {message_text[:100]}...[/dim]")
+        else:
+            self.console.print(f"[green]✅ ТЕСТ ФИЛЬТРАЦИИ: Сообщение пройдет фильтр[/green]")
+            self.console.print(f"[dim]Текст: {message_text[:100]}...[/dim]")
+    
     async def _export_new_messages_to_md(self, channel: ChannelInfo, useful_messages_count: int):
         """Экспорт новых сообщений в MD файл"""
         try:
@@ -812,10 +831,16 @@ class ContinuousExporter:
             
             # Фильтруем сообщения - берем только полезные (не отфильтрованные)
             for message in messages:
-                if not self.content_filter.should_filter_message(message):
+                # Получаем текст сообщения для фильтрации
+                message_text = getattr(message, 'text', '') or getattr(message, 'message', '') or ''
+                should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
+                
+                if not should_filter:
                     new_messages.append(message)
                     if len(new_messages) >= useful_messages_count:
                         break  # Останавливаемся когда набрали нужное количество
+                else:
+                    self.console.print(f"[dim]🔍 Сообщение отфильтровано при экспорте: {filter_reason}[/dim]")
             
             if not new_messages:
                 self.console.print(f"[yellow]⚠️ Не найдено полезных сообщений для экспорта в {channel.title}[/yellow]")
