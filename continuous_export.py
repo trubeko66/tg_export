@@ -80,6 +80,11 @@ class ContinuousExporter:
                 self.console.print("[yellow]⚠️ Файл каналов не найден[/yellow]")
                 return False
             
+            # Показываем настройки фильтрации
+            self.console.print(f"[blue]🔍 Настройки фильтрации:[/blue]")
+            self.console.print(f"[blue]  - Фильтр рекламы: {'включен' if self.content_filter.config.filter_ads else 'отключен'}[/blue]")
+            self.console.print(f"[blue]  - Фильтр IT-школ: {'включен' if self.content_filter.config.filter_schools else 'отключен'}[/blue]")
+            
             # Инициализируем статистику
             self.export_stats['total_channels'] = len(self.channels)
             
@@ -681,9 +686,10 @@ class ContinuousExporter:
                     self.console.print(f"[blue]🚀 Запускаем экспорт {useful_messages} сообщений для {channel.title}[/blue]")
                     await self._export_new_messages_to_md(channel, useful_messages)
                 elif useful_messages > 0 and not self.telegram_connected:
-                    self.console.print(f"[yellow]⚠️ Найдены новые сообщения в {channel.title}, но Telegram не подключен[/yellow]")
+                    self.console.print(f"[yellow]⚠️ Найдены новые сообщения в {channel.title}, но Telegram не подключен (демо-режим)[/yellow]")
                 elif useful_messages == 0 and filtered_messages > 0:
-                    self.console.print(f"[dim]ℹ️ В {channel.title} найдены {filtered_messages} сообщений, но все отфильтрованы[/dim]")
+                    mode = "демо-режим" if not self.telegram_connected else "реальный режим"
+                    self.console.print(f"[dim]ℹ️ В {channel.title} найдены {filtered_messages} сообщений, но все отфильтрованы ({mode})[/dim]")
                 
                 # Обновляем статистику
                 self.export_stats['checked_channels'] += 1
@@ -757,15 +763,16 @@ class ContinuousExporter:
                             message_text = getattr(message, 'text', '') or getattr(message, 'message', '') or ''
                             
                             # Тестируем фильтрацию для отладки
-                            self._test_message_filtering(message_text)
+                            self._test_message_filtering(message_text, channel.title)
                             
                             should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
                             
                             if should_filter:
                                 filtered_messages += 1
-                                self.console.print(f"[dim]🔍 Сообщение отфильтровано: {filter_reason}[/dim]")
+                                self.console.print(f"[red]❌ ОТФИЛЬТРОВАНО: {channel.title} - {filter_reason}[/red]")
                             else:
                                 useful_messages += 1
+                                self.console.print(f"[green]✅ ПРИНЯТО: {channel.title}[/green]")
                         
                         self.console.print(f"[cyan]📊 {channel.title}: полезных={useful_messages}, отфильтровано={filtered_messages}[/cyan]")
                         
@@ -801,15 +808,19 @@ class ContinuousExporter:
             self.export_stats['errors'] += 1
             return (0, 0)
     
-    def _test_message_filtering(self, message_text: str) -> None:
+    def _test_message_filtering(self, message_text: str, channel_title: str = "") -> None:
         """Тестирование фильтрации сообщения для отладки"""
+        if not message_text or message_text.strip() == "":
+            self.console.print(f"[yellow]⚠️ ПУСТОЕ СООБЩЕНИЕ в {channel_title}[/yellow]")
+            return
+            
         should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
         if should_filter:
-            self.console.print(f"[yellow]🔍 ТЕСТ ФИЛЬТРАЦИИ: Сообщение будет отфильтровано - {filter_reason}[/yellow]")
-            self.console.print(f"[dim]Текст: {message_text[:100]}...[/dim]")
+            self.console.print(f"[yellow]🔍 ФИЛЬТРАЦИЯ: {channel_title} - {filter_reason}[/yellow]")
+            self.console.print(f"[dim]📝 Текст: {message_text[:200]}...[/dim]")
         else:
-            self.console.print(f"[green]✅ ТЕСТ ФИЛЬТРАЦИИ: Сообщение пройдет фильтр[/green]")
-            self.console.print(f"[dim]Текст: {message_text[:100]}...[/dim]")
+            self.console.print(f"[green]✅ ПРОЙДЕТ ФИЛЬТР: {channel_title}[/green]")
+            self.console.print(f"[dim]📝 Текст: {message_text[:200]}...[/dim]")
     
     async def _export_new_messages_to_md(self, channel: ChannelInfo, useful_messages_count: int):
         """Экспорт новых сообщений в MD файл"""
