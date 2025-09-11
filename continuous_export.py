@@ -729,8 +729,11 @@ class ContinuousExporter:
                 
                 if messages and len(messages) > 0:
                     last_message = messages[0]
+                    self.console.print(f"[blue]🔍 Проверка {channel.title}: последнее сообщение ID={last_message.id}, известный ID={channel.last_message_id}[/blue]")
+                    
                     if last_message.id > channel.last_message_id:
                         new_messages_count = last_message.id - channel.last_message_id
+                        self.console.print(f"[green]✅ Найдено {new_messages_count} новых сообщений в {channel.title}[/green]")
                         
                         # Применяем фильтрацию к новым сообщениям
                         useful_messages = 0
@@ -749,11 +752,17 @@ class ContinuousExporter:
                             else:
                                 useful_messages += 1
                         
+                        self.console.print(f"[cyan]📊 {channel.title}: полезных={useful_messages}, отфильтровано={filtered_messages}[/cyan]")
+                        
                         # Обновляем информацию о канале
                         channel.last_message_id = last_message.id
                         channel.last_check = datetime.now().isoformat()
                         channel.last_message_date = last_message.date.isoformat()
                         return (useful_messages, filtered_messages)
+                    else:
+                        self.console.print(f"[dim]ℹ️ {channel.title}: новых сообщений нет[/dim]")
+                else:
+                    self.console.print(f"[yellow]⚠️ {channel.title}: не удалось получить сообщения[/yellow]")
                 
                 return (0, 0)
                 
@@ -786,20 +795,24 @@ class ContinuousExporter:
             # Получаем канал
             entity = await self.exporter.client.get_entity(channel.id)
             
-            # Получаем новые сообщения (только полезные, не отфильтрованные)
+            # Получаем новые сообщения (уже отфильтрованные в _check_single_channel)
+            # Используем правильный min_id - сообщения после последнего известного ID
             new_messages = []
             messages = await self.exporter.client.get_messages(
                 entity, 
                 min_id=channel.last_message_id - useful_messages_count,
-                limit=useful_messages_count
+                limit=useful_messages_count * 2  # Берем больше, чтобы учесть отфильтрованные
             )
             
-            # Фильтруем сообщения - берем только полезные
+            # Фильтруем сообщения - берем только полезные (не отфильтрованные)
             for message in messages:
                 if not self.content_filter.should_filter_message(message):
                     new_messages.append(message)
+                    if len(new_messages) >= useful_messages_count:
+                        break  # Останавливаемся когда набрали нужное количество
             
             if not new_messages:
+                self.console.print(f"[yellow]⚠️ Не найдено полезных сообщений для экспорта в {channel.title}[/yellow]")
                 return
             
             # Создаем директорию для канала
@@ -831,6 +844,8 @@ class ContinuousExporter:
                     messages_data.append(message_data)
             
             if messages_data:
+                self.console.print(f"[blue]📝 Экспортируем {len(messages_data)} сообщений в {channel.title}[/blue]")
+                
                 # Экспортируем новые сообщения в режиме дописывания
                 md_file = md_exporter.export_messages(messages_data, append_mode=True)
                 
@@ -839,6 +854,8 @@ class ContinuousExporter:
                     self.export_stats['exported_messages'] += len(messages_data)
                 else:
                     self.console.print(f"[yellow]⚠️ Не удалось экспортировать сообщения для {channel.title}[/yellow]")
+            else:
+                self.console.print(f"[yellow]⚠️ Нет данных для экспорта в {channel.title}[/yellow]")
             
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка экспорта новых сообщений для {channel.title}: {e}[/red]")
