@@ -676,6 +676,10 @@ class ContinuousExporter:
                 self.channel_useful_messages[channel.id] = useful_messages
                 self.channel_filtered_messages[channel.id] = filtered_messages
                 
+                # Если есть новые полезные сообщения, экспортируем их в MD файл
+                if useful_messages > 0 and self.telegram_connected and self.exporter:
+                    await self._export_new_messages_to_md(channel, useful_messages)
+                
                 # Обновляем статистику
                 self.export_stats['checked_channels'] += 1
                 if useful_messages > 0 or filtered_messages > 0:
@@ -710,6 +714,7 @@ class ContinuousExporter:
                     # Обновляем информацию о канале
                     channel.last_message_id += 1
                     channel.last_check = datetime.now().isoformat()
+                    channel.last_message_date = datetime.now().isoformat()
                     # Симулируем фильтрацию: 70% полезных, 30% отфильтрованных
                     total_messages = 1
                     useful_messages = int(total_messages * 0.7)
@@ -747,6 +752,7 @@ class ContinuousExporter:
                         # Обновляем информацию о канале
                         channel.last_message_id = last_message.id
                         channel.last_check = datetime.now().isoformat()
+                        channel.last_message_date = last_message.date.isoformat()
                         return (useful_messages, filtered_messages)
                 
                 return (0, 0)
@@ -770,6 +776,73 @@ class ContinuousExporter:
             self.console.print(f"[red]❌ Ошибка проверки канала {channel.title}: {e}[/red]")
             self.export_stats['errors'] += 1
             return (0, 0)
+    
+    async def _export_new_messages_to_md(self, channel: ChannelInfo, useful_messages_count: int):
+        """Экспорт новых сообщений в MD файл"""
+        try:
+            if not self.exporter or not self.exporter.client:
+                return
+            
+            # Получаем канал
+            entity = await self.exporter.client.get_entity(channel.id)
+            
+            # Получаем новые сообщения (только полезные, не отфильтрованные)
+            new_messages = []
+            messages = await self.exporter.client.get_messages(
+                entity, 
+                min_id=channel.last_message_id - useful_messages_count,
+                limit=useful_messages_count
+            )
+            
+            # Фильтруем сообщения - берем только полезные
+            for message in messages:
+                if not self.content_filter.should_filter_message(message):
+                    new_messages.append(message)
+            
+            if not new_messages:
+                return
+            
+            # Создаем директорию для канала
+            from pathlib import Path
+            try:
+                storage_cfg = self.config_manager.config.storage
+                base_dir = getattr(storage_cfg, 'export_base_dir', 'exports') or 'exports'
+            except Exception:
+                base_dir = 'exports'
+            
+            base_path = Path(base_dir)
+            base_path.mkdir(parents=True, exist_ok=True)
+            sanitized_title = self.exporter._sanitize_channel_filename(channel.title)
+            channel_dir = base_path / sanitized_title
+            channel_dir.mkdir(exist_ok=True)
+            
+            # Путь к MD файлу
+            md_file_path = channel_dir / f"{sanitized_title}.md"
+            
+            # Конвертируем сообщения в формат для экспорта
+            from exporters import MarkdownExporter
+            md_exporter = MarkdownExporter(str(channel_dir), sanitized_title)
+            
+            # Подготавливаем данные сообщений
+            messages_data = []
+            for message in new_messages:
+                message_data = self.exporter._convert_message_to_dict(message, entity)
+                if message_data:
+                    messages_data.append(message_data)
+            
+            if messages_data:
+                # Экспортируем новые сообщения в режиме дописывания
+                md_file = md_exporter.export_messages(messages_data, append_mode=True)
+                
+                if md_file and Path(md_file).exists():
+                    self.console.print(f"[green]✅ Экспортировано {len(messages_data)} новых сообщений в {channel.title}[/green]")
+                    self.export_stats['exported_messages'] += len(messages_data)
+                else:
+                    self.console.print(f"[yellow]⚠️ Не удалось экспортировать сообщения для {channel.title}[/yellow]")
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка экспорта новых сообщений для {channel.title}: {e}[/red]")
+            self.export_stats['errors'] += 1
     
     async def _cleanup(self):
         """Очистка ресурсов при завершении"""

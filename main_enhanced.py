@@ -2285,6 +2285,7 @@ class EnhancedTelegramExporter(TelegramExporter):
             channels_table.add_column("💬 Сообщений", style="yellow", justify="right", width=12)
             channels_table.add_column("📁 Размер (МБ)", style="magenta", justify="right", width=12)
             channels_table.add_column("🕒 Последняя проверка", style="dim", width=18)
+            channels_table.add_column("📅 Последнее сообщение", style="orange", width=18)
             channels_table.add_column("📊 Статус", style="blue", width=10, justify="center")
             
             # Показываем первые 8 каналов с улучшенным форматированием
@@ -2315,12 +2316,23 @@ class EnhancedTelegramExporter(TelegramExporter):
                 # Обрезаем название канала
                 title = channel.title[:22] + "..." if len(channel.title) > 25 else channel.title
                 
+                # Форматируем дату последнего сообщения
+                last_message_date = "—"
+                if hasattr(channel, 'last_message_date') and channel.last_message_date:
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(channel.last_message_date.replace('Z', '+00:00'))
+                        last_message_date = dt.strftime("%d.%m %H:%M")
+                    except:
+                        last_message_date = "—"
+                
                 channels_table.add_row(
                     str(i),
                     title,
                     messages,
                     size,
                     last_check,
+                    last_message_date,
                     status
                 )
             
@@ -2332,6 +2344,7 @@ class EnhancedTelegramExporter(TelegramExporter):
                     "[dim]...[/dim]", 
                     "[dim]...[/dim]", 
                     "[dim]...[/dim]",
+                    "[dim]...[/dim]",
                     "[dim]...[/dim]"
                 )
             
@@ -2341,6 +2354,7 @@ class EnhancedTelegramExporter(TelegramExporter):
                 f"[bold]{channels_count} каналов[/bold]",
                 f"[bold]{total_messages:,}[/bold]",
                 f"[bold]{total_size:.1f} МБ[/bold]",
+                "[bold]—[/bold]",
                 "[bold]—[/bold]",
                 "[bold]—[/bold]"
             )
