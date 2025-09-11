@@ -690,6 +690,7 @@ class ContinuousExporter:
                 elif useful_messages == 0 and filtered_messages > 0:
                     mode = "демо-режим" if not self.telegram_connected else "реальный режим"
                     self.console.print(f"[dim]ℹ️ В {channel.title} найдены {filtered_messages} сообщений, но все отфильтрованы ({mode})[/dim]")
+                    self.console.print(f"[dim]   💡 Проверьте детальную информацию выше для понимания причин фильтрации[/dim]")
                 
                 # Обновляем статистику
                 self.export_stats['checked_channels'] += 1
@@ -762,17 +763,22 @@ class ContinuousExporter:
                             # Получаем текст сообщения для фильтрации
                             message_text = getattr(message, 'text', '') or getattr(message, 'message', '') or ''
                             
+                            # Получаем дату сообщения
+                            message_date = self._format_message_date(message)
+                            
                             # Тестируем фильтрацию для отладки
-                            self._test_message_filtering(message_text, channel.title)
+                            self._test_message_filtering(message_text, channel.title, message_date)
                             
                             should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
                             
                             if should_filter:
                                 filtered_messages += 1
-                                self.console.print(f"[red]❌ ОТФИЛЬТРОВАНО: {channel.title} - {filter_reason}[/red]")
+                                date_info = f" от {message_date}" if message_date else ""
+                                self.console.print(f"[red]❌ ОТФИЛЬТРОВАНО: {channel.title}{date_info} - {filter_reason}[/red]")
                             else:
                                 useful_messages += 1
-                                self.console.print(f"[green]✅ ПРИНЯТО: {channel.title}[/green]")
+                                date_info = f" от {message_date}" if message_date else ""
+                                self.console.print(f"[green]✅ ПРИНЯТО: {channel.title}{date_info}[/green]")
                         
                         self.console.print(f"[cyan]📊 {channel.title}: полезных={useful_messages}, отфильтровано={filtered_messages}[/cyan]")
                         
@@ -808,18 +814,34 @@ class ContinuousExporter:
             self.export_stats['errors'] += 1
             return (0, 0)
     
-    def _test_message_filtering(self, message_text: str, channel_title: str = "") -> None:
+    def _format_message_date(self, message) -> str:
+        """Форматирование даты сообщения"""
+        if not hasattr(message, 'date') or not message.date:
+            return ""
+        
+        try:
+            from datetime import datetime
+            if isinstance(message.date, datetime):
+                return message.date.strftime("%Y-%m-%d %H:%M")
+            else:
+                return str(message.date)
+        except Exception:
+            return str(getattr(message, 'date', ''))
+    
+    def _test_message_filtering(self, message_text: str, channel_title: str = "", message_date: str = "") -> None:
         """Тестирование фильтрации сообщения для отладки"""
         if not message_text or message_text.strip() == "":
             self.console.print(f"[yellow]⚠️ ПУСТОЕ СООБЩЕНИЕ в {channel_title}[/yellow]")
             return
             
         should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
+        date_info = f" от {message_date}" if message_date else ""
+        
         if should_filter:
-            self.console.print(f"[yellow]🔍 ФИЛЬТРАЦИЯ: {channel_title} - {filter_reason}[/yellow]")
+            self.console.print(f"[yellow]🔍 ФИЛЬТРАЦИЯ: {channel_title}{date_info} - {filter_reason}[/yellow]")
             self.console.print(f"[dim]📝 Текст: {message_text[:200]}...[/dim]")
         else:
-            self.console.print(f"[green]✅ ПРОЙДЕТ ФИЛЬТР: {channel_title}[/green]")
+            self.console.print(f"[green]✅ ПРОЙДЕТ ФИЛЬТР: {channel_title}{date_info}[/green]")
             self.console.print(f"[dim]📝 Текст: {message_text[:200]}...[/dim]")
     
     async def _export_new_messages_to_md(self, channel: ChannelInfo, useful_messages_count: int):
@@ -844,6 +866,10 @@ class ContinuousExporter:
             for message in messages:
                 # Получаем текст сообщения для фильтрации
                 message_text = getattr(message, 'text', '') or getattr(message, 'message', '') or ''
+                
+                # Получаем дату сообщения
+                message_date = self._format_message_date(message)
+                
                 should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
                 
                 if not should_filter:
@@ -851,7 +877,8 @@ class ContinuousExporter:
                     if len(new_messages) >= useful_messages_count:
                         break  # Останавливаемся когда набрали нужное количество
                 else:
-                    self.console.print(f"[dim]🔍 Сообщение отфильтровано при экспорте: {filter_reason}[/dim]")
+                    date_info = f" от {message_date}" if message_date else ""
+                    self.console.print(f"[dim]🔍 Сообщение отфильтровано при экспорте{date_info}: {filter_reason}[/dim]")
             
             if not new_messages:
                 self.console.print(f"[yellow]⚠️ Не найдено полезных сообщений для экспорта в {channel.title}[/yellow]")
