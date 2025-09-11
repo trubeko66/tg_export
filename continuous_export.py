@@ -67,7 +67,7 @@ class ContinuousExporter:
         """Настройка логгера для фильтрации сообщений"""
         # Создаем отдельный логгер для фильтрации
         self.filter_logger = logging.getLogger('ads_filter')
-        self.filter_logger.setLevel(logging.INFO)
+        self.filter_logger.setLevel(logging.DEBUG)
         
         # Удаляем существующие обработчики, если есть
         for handler in self.filter_logger.handlers[:]:
@@ -75,10 +75,10 @@ class ContinuousExporter:
         
         # Создаем обработчик для файла ads.log
         file_handler = logging.FileHandler('ads.log', encoding='utf-8')
-        file_handler.setLevel(logging.INFO)
+        file_handler.setLevel(logging.DEBUG)
         
-        # Формат лога
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        # Расширенный формат лога с дополнительной информацией
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - [%(name)s] - %(funcName)s:%(lineno)d - %(message)s')
         file_handler.setFormatter(formatter)
         
         # Добавляем обработчик к логгеру
@@ -115,6 +115,7 @@ class ContinuousExporter:
             
             # Логируем настройки фильтрации
             self.filter_logger.info(f"FILTER_SETTINGS: ads_filter={self.content_filter.config.filter_ads}, schools_filter={self.content_filter.config.filter_schools}")
+            self.filter_logger.debug(f"Filter initialization completed. Channels loaded: {len(self.channels)}")
             
             # Инициализируем статистику
             self.export_stats['total_channels'] = len(self.channels)
@@ -693,6 +694,7 @@ class ContinuousExporter:
         """Проверка каналов на обновления"""
         try:
             self._last_check_time = datetime.now()
+            self.filter_logger.debug(f"Starting channels check at {self._last_check_time}")
             
             # Показываем статусный экран во время проверки
             await self._show_checking_status()
@@ -703,6 +705,7 @@ class ContinuousExporter:
                 
                 # Обновляем время последней проверки
                 self.last_check_times[channel.id] = datetime.now()
+                self.filter_logger.debug(f"Checking channel {i+1}/{len(self.channels)}: {channel.title}")
                 
                 # Проверяем канал на новые сообщения
                 useful_messages, filtered_messages = await self._check_single_channel(channel)
@@ -740,16 +743,25 @@ class ContinuousExporter:
             
             # Отправляем сводку в Telegram
             await self._send_check_summary()
+            
+            # Логируем завершение проверки
+            total_useful = sum(self.channel_useful_messages.values())
+            total_filtered = sum(self.channel_filtered_messages.values())
+            self.filter_logger.debug(f"Channels check completed. Total useful: {total_useful}, total filtered: {total_filtered}")
                 
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка проверки каналов: {e}[/red]")
+            self.filter_logger.error(f"Error during channels check: {e}")
             self.export_stats['errors'] += 1
     
     async def _check_single_channel(self, channel: ChannelInfo) -> tuple:
         """Проверка одного канала на новые сообщения"""
         try:
+            self.filter_logger.debug(f"Checking single channel: {channel.title}, last_message_id: {channel.last_message_id}")
+            
             # Если Telegram не подключен, работаем в демо-режиме
             if not self.telegram_connected or not self.exporter or not self.exporter.client:
+                self.filter_logger.debug(f"Working in demo mode for {channel.title}")
                 await asyncio.sleep(0.1)  # Симуляция задержки
                 
                 # Симулируем обнаружение новых сообщений (каждый 5-й канал)
@@ -762,21 +774,25 @@ class ContinuousExporter:
                     total_messages = 1
                     useful_messages = int(total_messages * 0.7)
                     filtered_messages = total_messages - useful_messages
+                    self.filter_logger.debug(f"Demo mode simulation for {channel.title}: useful={useful_messages}, filtered={filtered_messages}")
                     return (useful_messages, filtered_messages)
                 return (0, 0)
             
             # Реальная проверка через Telegram API
             try:
+                self.filter_logger.debug(f"Getting entity for channel {channel.title}")
                 entity = await self.exporter.client.get_entity(channel.id)
                 messages = await self.exporter.client.get_messages(entity, limit=1)
                 
                 if messages and len(messages) > 0:
                     last_message = messages[0]
                     self.console.print(f"[blue]🔍 Проверка {channel.title}: последнее сообщение ID={last_message.id}, известный ID={channel.last_message_id}[/blue]")
+                    self.filter_logger.debug(f"Last message ID: {last_message.id}, known ID: {channel.last_message_id}")
                     
                     if last_message.id > channel.last_message_id:
                         new_messages_count = last_message.id - channel.last_message_id
                         self.console.print(f"[green]✅ Найдено {new_messages_count} новых сообщений в {channel.title}[/green]")
+                        self.filter_logger.debug(f"Found {new_messages_count} new messages in {channel.title}")
                         
                         # Применяем фильтрацию к новым сообщениям
                         useful_messages = 0
@@ -797,8 +813,11 @@ class ContinuousExporter:
                             # Получаем дату сообщения
                             message_date = self._format_message_date(message)
                             
+                            message_id = str(getattr(message, 'id', 'unknown'))
+                            self.filter_logger.debug(f"Processing message from {channel.title}, ID: {message_id}, date: {message_date}")
+                            
                             # Тестируем фильтрацию для отладки
-                            self._test_message_filtering(message_text, channel.title, message_date)
+                            self._test_message_filtering(message_text, channel.title, message_date, message_id)
                             
                             should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
                             
@@ -807,15 +826,15 @@ class ContinuousExporter:
                                 date_info = f" от {message_date}" if message_date else ""
                                 self.console.print(f"[red]❌ ОТФИЛЬТРОВАНО: {channel.title}{date_info} - {filter_reason}[/red]")
                                 
-                                # Логируем в ads.log
-                                self.filter_logger.info(f"FILTERED: {channel.title}{date_info} - {filter_reason} | Text: {message_text[:500]}")
+                                # Используем специальное логирование для отфильтрованных сообщений
+                                self._log_filtered_message(channel.title, message_date, message_text, filter_reason, message_id)
                             else:
                                 useful_messages += 1
                                 date_info = f" от {message_date}" if message_date else ""
                                 self.console.print(f"[green]✅ ПРИНЯТО: {channel.title}{date_info}[/green]")
                                 
-                                # Логируем в ads.log
-                                self.filter_logger.info(f"PASSED: {channel.title}{date_info} | Text: {message_text[:500]}")
+                                # Используем специальное логирование для прошедших сообщений
+                                self._log_passed_message(channel.title, message_date, message_text, message_id)
                         
                         self.console.print(f"[cyan]📊 {channel.title}: полезных={useful_messages}, отфильтровано={filtered_messages}[/cyan]")
                         
@@ -869,27 +888,57 @@ class ContinuousExporter:
         except Exception:
             return str(getattr(message, 'date', ''))
     
-    def _test_message_filtering(self, message_text: str, channel_title: str = "", message_date: str = "") -> None:
+    def _log_filtered_message(self, channel_title: str, message_date: str, message_text: str, filter_reason: str, message_id: str = ""):
+        """Специальное логирование отфильтрованных сообщений в ads.log"""
+        # Обрезаем текст до 200 символов
+        truncated_text = message_text[:200] + "..." if len(message_text) > 200 else message_text
+        
+        # Формируем структурированную запись
+        log_entry = f"FILTERED_MESSAGE | Channel: {channel_title} | Date: {message_date} | ID: {message_id} | Reason: {filter_reason} | Text: {truncated_text}"
+        
+        # Логируем с уровнем INFO для отфильтрованных сообщений
+        self.filter_logger.info(log_entry)
+        
+        # Дополнительно логируем с уровнем DEBUG для полной информации
+        self.filter_logger.debug(f"Full filtered message details - Channel: {channel_title}, Date: {message_date}, ID: {message_id}, Reason: {filter_reason}, Full text: {message_text}")
+    
+    def _log_passed_message(self, channel_title: str, message_date: str, message_text: str, message_id: str = ""):
+        """Логирование сообщений, прошедших фильтр"""
+        # Обрезаем текст до 200 символов
+        truncated_text = message_text[:200] + "..." if len(message_text) > 200 else message_text
+        
+        # Формируем структурированную запись
+        log_entry = f"PASSED_MESSAGE | Channel: {channel_title} | Date: {message_date} | ID: {message_id} | Text: {truncated_text}"
+        
+        # Логируем с уровнем INFO
+        self.filter_logger.info(log_entry)
+    
+    def _test_message_filtering(self, message_text: str, channel_title: str = "", message_date: str = "", message_id: str = "") -> None:
         """Тестирование фильтрации сообщения для отладки"""
+        self.filter_logger.debug(f"Testing message filtering for channel: {channel_title}, date: {message_date}, ID: {message_id}")
+        
         if not message_text or message_text.strip() == "":
             self.console.print(f"[yellow]⚠️ ПУСТОЕ СООБЩЕНИЕ в {channel_title}[/yellow]")
+            self.filter_logger.warning(f"Empty message detected in channel: {channel_title}")
             return
             
         should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
         date_info = f" от {message_date}" if message_date else ""
         
+        self.filter_logger.debug(f"Filter result: should_filter={should_filter}, reason='{filter_reason}'")
+        
         if should_filter:
             self.console.print(f"[yellow]🔍 ФИЛЬТРАЦИЯ: {channel_title}{date_info} - {filter_reason}[/yellow]")
             self.console.print(f"[dim]📝 Текст: {message_text[:200]}...[/dim]")
             
-            # Логируем в ads.log
-            self.filter_logger.info(f"FILTERED: {channel_title}{date_info} - {filter_reason} | Text: {message_text[:500]}")
+            # Используем специальное логирование для отфильтрованных сообщений
+            self._log_filtered_message(channel_title, message_date, message_text, filter_reason, message_id)
         else:
             self.console.print(f"[green]✅ ПРОЙДЕТ ФИЛЬТР: {channel_title}{date_info}[/green]")
             self.console.print(f"[dim]📝 Текст: {message_text[:200]}...[/dim]")
             
-            # Логируем в ads.log
-            self.filter_logger.info(f"PASSED: {channel_title}{date_info} | Text: {message_text[:500]}")
+            # Используем специальное логирование для прошедших сообщений
+            self._log_passed_message(channel_title, message_date, message_text, message_id)
     
     async def _export_new_messages_to_md(self, channel: ChannelInfo, useful_messages_count: int):
         """Экспорт новых сообщений в MD файл"""
@@ -910,25 +959,32 @@ class ContinuousExporter:
             )
             
             # Фильтруем сообщения - берем только полезные (не отфильтрованные)
+            self.filter_logger.debug(f"Starting export filtering for {channel.title}, need {useful_messages_count} useful messages")
+            
             for message in messages:
                 # Получаем текст сообщения для фильтрации
                 message_text = getattr(message, 'text', '') or getattr(message, 'message', '') or ''
                 
                 # Получаем дату сообщения
                 message_date = self._format_message_date(message)
+                message_id = str(getattr(message, 'id', 'unknown'))
+                
+                self.filter_logger.debug(f"Export filtering message ID {message_id} from {channel.title}")
                 
                 should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
                 
                 if not should_filter:
                     new_messages.append(message)
+                    self.filter_logger.debug(f"Message ID {message_id} added to export queue")
                     if len(new_messages) >= useful_messages_count:
+                        self.filter_logger.debug(f"Reached target count {useful_messages_count} for export")
                         break  # Останавливаемся когда набрали нужное количество
                 else:
                     date_info = f" от {message_date}" if message_date else ""
                     self.console.print(f"[dim]🔍 Сообщение отфильтровано при экспорте{date_info}: {filter_reason}[/dim]")
                     
-                    # Логируем в ads.log
-                    self.filter_logger.info(f"FILTERED_DURING_EXPORT: {channel.title}{date_info} - {filter_reason} | Text: {message_text[:500]}")
+                    # Используем специальное логирование для отфильтрованных сообщений при экспорте
+                    self._log_filtered_message(channel.title, message_date, message_text, f"EXPORT_FILTER: {filter_reason}", message_id)
             
             if not new_messages:
                 self.console.print(f"[yellow]⚠️ Не найдено полезных сообщений для экспорта в {channel.title}[/yellow]")
