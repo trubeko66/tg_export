@@ -2285,7 +2285,7 @@ class EnhancedTelegramExporter(TelegramExporter):
             channels_table.add_column("💬 Сообщений", style="yellow", justify="right", width=12)
             channels_table.add_column("📁 Размер (МБ)", style="magenta", justify="right", width=12)
             channels_table.add_column("🕒 Последняя проверка", style="dim", width=18)
-            channels_table.add_column("📅 Последнее сообщение", style="orange", width=18)
+            channels_table.add_column("📅 Последнее сообщение", style="orange1", width=18)
             channels_table.add_column("📊 Статус", style="blue", width=10, justify="center")
             
             # Показываем первые 8 каналов с улучшенным форматированием
