@@ -806,32 +806,32 @@ class ContinuousExporter:
                             limit=new_messages_count
                         )
                         
-                            for message in new_messages:
-                                # Получаем текст сообщения для фильтрации
-                                message_text = getattr(message, 'text', '') or getattr(message, 'message', '') or ''
+                        for message in new_messages:
+                            # Получаем текст сообщения для фильтрации
+                            message_text = getattr(message, 'text', '') or getattr(message, 'message', '') or ''
+                            
+                            # Получаем дату сообщения
+                            message_date = self._format_message_date(message)
+                            
+                            message_id = str(getattr(message, 'id', 'unknown'))
+                            
+                            # Простая фильтрация как в рабочем коммите
+                            should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
+                            
+                            if should_filter:
+                                filtered_messages += 1
+                                date_info = f" от {message_date}" if message_date else ""
+                                self.console.print(f"[red]❌ ОТФИЛЬТРОВАНО: {channel.title}{date_info} - {filter_reason}[/red]")
                                 
-                                # Получаем дату сообщения
-                                message_date = self._format_message_date(message)
+                                # Логируем отфильтрованное сообщение
+                                self._log_filtered_message(channel.title, message_date, message_text, filter_reason, message_id)
+                            else:
+                                useful_messages += 1
+                                date_info = f" от {message_date}" if message_date else ""
+                                self.console.print(f"[green]✅ ПРИНЯТО: {channel.title}{date_info}[/green]")
                                 
-                                message_id = str(getattr(message, 'id', 'unknown'))
-                                
-                                # Простая фильтрация как в рабочем коммите
-                                should_filter, filter_reason = self.content_filter.should_filter_message(message_text)
-                                
-                                if should_filter:
-                                    filtered_messages += 1
-                                    date_info = f" от {message_date}" if message_date else ""
-                                    self.console.print(f"[red]❌ ОТФИЛЬТРОВАНО: {channel.title}{date_info} - {filter_reason}[/red]")
-                                    
-                                    # Логируем отфильтрованное сообщение
-                                    self._log_filtered_message(channel.title, message_date, message_text, filter_reason, message_id)
-                                else:
-                                    useful_messages += 1
-                                    date_info = f" от {message_date}" if message_date else ""
-                                    self.console.print(f"[green]✅ ПРИНЯТО: {channel.title}{date_info}[/green]")
-                                    
-                                    # Логируем прошедшее сообщение
-                                    self._log_passed_message(channel.title, message_date, message_text, message_id)
+                                # Логируем прошедшее сообщение
+                                self._log_passed_message(channel.title, message_date, message_text, message_id)
                         
                         self.console.print(f"[cyan]📊 {channel.title}: полезных={useful_messages}, отфильтровано={filtered_messages}[/cyan]")
                         
