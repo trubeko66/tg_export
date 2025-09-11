@@ -678,7 +678,12 @@ class ContinuousExporter:
                 
                 # Если есть новые полезные сообщения, экспортируем их в MD файл
                 if useful_messages > 0 and self.telegram_connected and self.exporter:
+                    self.console.print(f"[blue]🚀 Запускаем экспорт {useful_messages} сообщений для {channel.title}[/blue]")
                     await self._export_new_messages_to_md(channel, useful_messages)
+                elif useful_messages > 0 and not self.telegram_connected:
+                    self.console.print(f"[yellow]⚠️ Найдены новые сообщения в {channel.title}, но Telegram не подключен[/yellow]")
+                elif useful_messages == 0 and filtered_messages > 0:
+                    self.console.print(f"[dim]ℹ️ В {channel.title} найдены {filtered_messages} сообщений, но все отфильтрованы[/dim]")
                 
                 # Обновляем статистику
                 self.export_stats['checked_channels'] += 1
@@ -740,6 +745,7 @@ class ContinuousExporter:
                         filtered_messages = 0
                         
                         # Получаем новые сообщения для фильтрации
+                        # min_id=channel.last_message_id означает "сообщения с ID больше last_message_id"
                         new_messages = await self.exporter.client.get_messages(
                             entity, 
                             min_id=channel.last_message_id,
@@ -795,12 +801,12 @@ class ContinuousExporter:
             # Получаем канал
             entity = await self.exporter.client.get_entity(channel.id)
             
-            # Получаем новые сообщения (уже отфильтрованные в _check_single_channel)
-            # Используем правильный min_id - сообщения после последнего известного ID
+            # Получаем новые сообщения для экспорта
+            # min_id=channel.last_message_id означает "сообщения с ID больше last_message_id"
             new_messages = []
             messages = await self.exporter.client.get_messages(
                 entity, 
-                min_id=channel.last_message_id - useful_messages_count,
+                min_id=channel.last_message_id - useful_messages_count,  # Получаем сообщения начиная с нужного ID
                 limit=useful_messages_count * 2  # Берем больше, чтобы учесть отфильтрованные
             )
             
@@ -976,7 +982,13 @@ class ContinuousExporter:
     def _load_channels_state(self):
         """Загрузка состояния каналов из файла"""
         try:
+            # Инициализируем last_message_id для всех каналов
+            for channel in self.channels:
+                if not hasattr(channel, 'last_message_id') or channel.last_message_id is None:
+                    channel.last_message_id = 0
+            
             if not self.channels_state_file.exists():
+                self.console.print("[blue]ℹ️ Файл состояния каналов не найден, инициализируем с нуля[/blue]")
                 return
             
             import json
@@ -992,6 +1004,11 @@ class ContinuousExporter:
                     channel.last_message_id = state.get('last_message_id', channel.last_message_id)
                     channel.last_check = state.get('last_check', channel.last_check)
                     updated_count += 1
+                else:
+                    # Если канал не в состоянии, инициализируем last_message_id как 0
+                    # чтобы при первой проверке получить все сообщения
+                    if not hasattr(channel, 'last_message_id') or channel.last_message_id is None:
+                        channel.last_message_id = 0
             
             if updated_count > 0:
                 self.console.print(f"[green]✅ Загружено состояние {updated_count} каналов[/green]")
