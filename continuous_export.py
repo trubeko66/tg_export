@@ -848,6 +848,10 @@ class ContinuousExporter:
                         channel.last_message_id = last_message.id
                         channel.last_check = datetime.now().isoformat()
                         channel.last_message_date = last_message.date.isoformat()
+                        
+                        # Обновляем last_message_id в файле .channels
+                        self.config_manager.update_channel_last_message_id(channel.id, last_message.id)
+                        
                         return (useful_messages, filtered_messages)
                     else:
                         self.console.print(f"[dim]ℹ️ {channel.title}: новых сообщений нет[/dim]")
@@ -892,15 +896,18 @@ class ContinuousExporter:
     
     def _log_filtered_message(self, channel_title: str, message_date: str, message_text: str, filter_reason: str, message_id: str = ""):
         """Логирование отфильтрованных сообщений в ads.log"""
-        # Обрезаем текст до 200 символов
-        truncated_text = message_text[:200] + "..." if len(message_text) > 200 else message_text
+        # Получаем 2-3 первых предложения
+        sentences = message_text.split('. ')
+        first_sentences = '. '.join(sentences[:3])
+        if len(sentences) > 3:
+            first_sentences += "..."
         
         # Проверяем filter_reason
         if not filter_reason or filter_reason.strip() == "":
             filter_reason = "Причина не указана"
         
-        # Простая запись в лог
-        log_entry = f"ОТФИЛЬТРОВАНО | Канал: {channel_title} | Дата: {message_date} | ID: {message_id} | Причина: {filter_reason} | Текст: {truncated_text}"
+        # Запись в лог с указанием фильтра и первых предложений
+        log_entry = f"ОТФИЛЬТРОВАНО | Канал: {channel_title} | Дата: {message_date} | ID: {message_id} | Фильтр: {filter_reason} | Текст: {first_sentences}"
         self.filter_logger.info(log_entry)
     
     def _log_passed_message(self, channel_title: str, message_date: str, message_text: str, message_id: str = ""):
