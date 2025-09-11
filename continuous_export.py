@@ -26,6 +26,7 @@ from telegram_exporter import TelegramExporter, ChannelInfo
 from config_manager import ConfigManager
 from content_filter import ContentFilter
 from telegram_notifications import TelegramNotifier
+from message_detector import MessageDetector
 
 
 class ContinuousExporter:
@@ -36,6 +37,7 @@ class ContinuousExporter:
         self.config_manager = ConfigManager()
         self.content_filter = ContentFilter()
         self.telegram_notifier = TelegramNotifier(console)
+        self.message_detector = MessageDetector()
         self.exporter = None
         self.channels = []
         self.is_running = False
@@ -86,6 +88,32 @@ class ContinuousExporter:
         
         # Предотвращаем дублирование сообщений
         self.filter_logger.propagate = False
+        
+        # Настраиваем логгер для export.log
+        self._setup_export_logger()
+    
+    def _setup_export_logger(self):
+        """Настройка логгера для export.log"""
+        self.export_logger = logging.getLogger('export')
+        self.export_logger.setLevel(logging.INFO)
+        
+        # Удаляем существующие обработчики
+        for handler in self.export_logger.handlers[:]:
+            self.export_logger.removeHandler(handler)
+        
+        # Создаем обработчик для файла export.log
+        file_handler = logging.FileHandler('export.log', encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        
+        # Формат лога согласно техническому заданию
+        formatter = logging.Formatter('[%(asctime)s] %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        
+        # Добавляем обработчик к логгеру
+        self.export_logger.addHandler(file_handler)
+        
+        # Предотвращаем дублирование сообщений
+        self.export_logger.propagate = False
     
     def _signal_handler(self, signum, frame):
         """Обработчик сигналов для корректного завершения"""
@@ -760,6 +788,17 @@ class ContinuousExporter:
     async def _check_single_channel(self, channel: ChannelInfo) -> tuple:
         """Проверка одного канала на новые сообщения"""
         try:
+            # Получаем последний известный ID из существующих файлов
+            sanitized_title = self.exporter._sanitize_channel_filename(channel.title)
+            file_last_id = self.message_detector.get_channel_last_message_id(channel.title, sanitized_title)
+            
+            # Используем ID из файла, если он больше чем в конфигурации
+            if file_last_id and file_last_id > channel.last_message_id:
+                self.filter_logger.info(f"Found newer ID in files for {channel.title}: file_id={file_last_id}, config_id={channel.last_message_id}")
+                channel.last_message_id = file_last_id
+                # Обновляем в конфигурации
+                self.config_manager.update_channel_last_message_id(channel.id, file_last_id)
+            
             self.filter_logger.debug(f"Checking single channel: {channel.title}, last_message_id: {channel.last_message_id}")
             
             # Если Telegram не подключен, работаем в демо-режиме
@@ -856,6 +895,11 @@ class ContinuousExporter:
                                 
                                 # Логируем отфильтрованное сообщение
                                 self._log_filtered_message(channel.title, message_date, message_text, filter_reason, message_id)
+                                
+                                # Отправляем немедленное уведомление о фильтрации
+                                await self.telegram_notifier.send_immediate_notification(
+                                    channel.title, message_text, message_date, "ПРОВАЛ", f"Фильтр: {filter_reason}"
+                                )
                             else:
                                 useful_messages += 1
                                 date_info = f" от {message_date}" if message_date else ""
@@ -864,12 +908,21 @@ class ContinuousExporter:
                                 
                                 # Логируем прошедшее сообщение
                                 self._log_passed_message(channel.title, message_date, message_text, message_id)
+                                
+                                # Отправляем немедленное уведомление об успехе
+                                await self.telegram_notifier.send_immediate_notification(
+                                    channel.title, message_text, message_date, "УСПЕХ"
+                                )
                         
                         self.console.print(f"[cyan]📊 {channel.title}: полезных={useful_messages}, отфильтровано={filtered_messages}[/cyan]")
                         
                         # Логируем статистику по каналу
                         if useful_messages > 0 or filtered_messages > 0:
                             self.filter_logger.info(f"CHANNEL_STATS: {channel.title} - useful={useful_messages}, filtered={filtered_messages}")
+                            
+                            # Логируем в export.log согласно техническому заданию
+                            total_exported = useful_messages
+                            self.export_logger.info(f"#{channel.title}: Скачано {new_messages_count} новых сообщений. Всего: {total_exported}, Отфильтровано: {filtered_messages}")
                         
                         # Обновляем last_message_id в файле .channels
                         self.config_manager.update_channel_last_message_id(channel.id, last_message.id)
@@ -932,8 +985,8 @@ class ContinuousExporter:
             if not filter_reason or filter_reason.strip() == "":
                 filter_reason = "Причина не указана"
             
-            # Запись в лог с указанием фильтра и первых предложений
-            log_entry = f"ОТФИЛЬТРОВАНО | Канал: {channel_title} | Дата: {message_date} | ID: {message_id} | Фильтр: {filter_reason} | Текст: {first_sentences}"
+            # Запись в лог согласно техническому заданию: [Дата Время] КАНАЛ: message_id - ПРИЧИНА_ФИЛЬТРАЦИИ ("...фрагмент_текста_сообщения...")
+            log_entry = f"{channel_title}: msg_{message_id} - {filter_reason} (\"{first_sentences}\")"
             
             # Проверяем, что логгер существует
             if hasattr(self, 'filter_logger') and self.filter_logger:

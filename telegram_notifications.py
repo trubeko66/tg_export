@@ -76,6 +76,27 @@ class TelegramNotifier:
             self._save_report_to_log(report_data)
             return False
     
+    async def send_immediate_notification(self, 
+                                        channel_name: str, 
+                                        message_text: str, 
+                                        message_date: str, 
+                                        status: str, 
+                                        status_reason: str = ""):
+        """Отправка немедленного уведомления о новом сообщении"""
+        try:
+            if not self.is_configured():
+                return False
+            
+            message = self._create_immediate_notification_message(
+                channel_name, message_text, message_date, status, status_reason
+            )
+            
+            return await self._send_message(message)
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка отправки немедленного уведомления: {e}[/red]")
+            return False
+    
     async def send_continuous_check_summary(self, check_results: dict):
         """Отправка сводки по завершении постоянной проверки"""
         try:
@@ -375,6 +396,33 @@ class TelegramNotifier:
                 
         except Exception as e:
             self.console.print(f"[red]❌ Ошибка обработки очереди: {e}[/red]")
+    
+    def _create_immediate_notification_message(self, 
+                                             channel_name: str, 
+                                             message_text: str, 
+                                             message_date: str, 
+                                             status: str, 
+                                             status_reason: str = "") -> str:
+        """Создание сообщения немедленного уведомления"""
+        try:
+            # Очищаем текст сообщения для Telegram
+            clean_text = self._clean_message_for_telegram(message_text)
+            
+            # Формируем сообщение согласно техническому заданию
+            message = f"Канал: #{channel_name}\n"
+            message += f"Аннотация: {clean_text}\n"
+            message += f"Дата и время: {message_date}\n"
+            
+            if status == "УСПЕХ":
+                message += f"Статус выгрузки: [УСПЕХ]"
+            else:
+                message += f"Статус выгрузки: [ПРОВАЛ] {status_reason}"
+            
+            return message
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка создания уведомления: {e}[/red]")
+            return f"Ошибка создания уведомления для канала {channel_name}: {e}"
     
     def _create_continuous_check_message(self, check_results: dict) -> str:
         """Создание сообщения сводки постоянной проверки"""
