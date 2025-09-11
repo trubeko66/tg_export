@@ -792,22 +792,46 @@ class ContinuousExporter:
                     self.console.print(f"[blue]🔍 Проверка {channel.title}: последнее сообщение ID={last_message.id}, известный ID={channel.last_message_id}[/blue]")
                     self.filter_logger.debug(f"Last message ID: {last_message.id}, known ID: {channel.last_message_id}")
                     
-                    if last_message.id > channel.last_message_id:
-                        new_messages_count = last_message.id - channel.last_message_id
+                    # Обновляем last_message_id всегда, чтобы отслеживать текущее состояние
+                    old_last_message_id = channel.last_message_id
+                    channel.last_message_id = last_message.id
+                    channel.last_check = datetime.now().isoformat()
+                    channel.last_message_date = last_message.date.isoformat()
+                    
+                    # Отладочная информация
+                    self.filter_logger.debug(f"Channel {channel.title}: old_id={old_last_message_id}, new_id={last_message.id}, date={channel.last_message_date}")
+                    
+                    if last_message.id > old_last_message_id:
+                        # Получаем все новые сообщения с момента последней проверки
+                        try:
+                            # Пробуем использовать offset_id для получения сообщений после определенного ID
+                            new_messages = await self.exporter.client.get_messages(
+                                entity, 
+                                offset_id=old_last_message_id,
+                                limit=100  # Ограничиваем количество для производительности
+                            )
+                            
+                            # Фильтруем только действительно новые сообщения
+                            new_messages = [msg for msg in new_messages if msg.id > old_last_message_id]
+                            
+                        except Exception as e:
+                            self.filter_logger.warning(f"Failed to get messages with offset_id for {channel.title}: {e}")
+                            # Альтернативный метод: получаем последние сообщения и фильтруем
+                            new_messages = await self.exporter.client.get_messages(
+                                entity, 
+                                limit=50  # Получаем последние 50 сообщений
+                            )
+                            # Фильтруем только новые сообщения
+                            new_messages = [msg for msg in new_messages if msg.id > old_last_message_id]
+                        
+                        new_messages_count = len(new_messages)
+                        
                         self.console.print(f"[green]✅ Найдено {new_messages_count} новых сообщений в {channel.title}[/green]")
                         self.filter_logger.debug(f"Found {new_messages_count} new messages in {channel.title}")
                         
                         # Применяем фильтрацию к новым сообщениям
                         useful_messages = 0
                         filtered_messages = 0
-                        
-                        # Получаем новые сообщения для фильтрации
-                        # min_id=channel.last_message_id означает "сообщения с ID больше last_message_id"
-                        new_messages = await self.exporter.client.get_messages(
-                            entity, 
-                            min_id=channel.last_message_id,
-                            limit=new_messages_count
-                        )
                         
                         for message in new_messages:
                             # Получаем текст сообщения для фильтрации
@@ -847,19 +871,17 @@ class ContinuousExporter:
                         if useful_messages > 0 or filtered_messages > 0:
                             self.filter_logger.info(f"CHANNEL_STATS: {channel.title} - useful={useful_messages}, filtered={filtered_messages}")
                         
-                        # Обновляем информацию о канале
-                        channel.last_message_id = last_message.id
-                        channel.last_check = datetime.now().isoformat()
-                        channel.last_message_date = last_message.date.isoformat()
-                        
                         # Обновляем last_message_id в файле .channels
                         self.config_manager.update_channel_last_message_id(channel.id, last_message.id)
                         
                         return (useful_messages, filtered_messages)
                     else:
-                        self.console.print(f"[dim]ℹ️ {channel.title}: новых сообщений нет[/dim]")
+                        self.console.print(f"[dim]ℹ️ {channel.title}: новых сообщений нет (ID не изменился)[/dim]")
+                        # Обновляем last_message_id в файле .channels даже если новых сообщений нет
+                        self.config_manager.update_channel_last_message_id(channel.id, last_message.id)
                 else:
                     self.console.print(f"[yellow]⚠️ {channel.title}: не удалось получить сообщения[/yellow]")
+                    self.filter_logger.warning(f"Failed to get messages for channel {channel.title}")
                 
                 return (0, 0)
                 
