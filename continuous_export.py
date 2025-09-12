@@ -55,6 +55,12 @@ class ContinuousExporter:
         self.channel_new_messages = {}  # Словарь для хранения новых сообщений по каналам
         self.channel_filtered_messages = {}  # Словарь для отслеживания отфильтрованных сообщений по каналам
         self.channel_useful_messages = {}  # Словарь для отслеживания полезных сообщений по каналам
+        
+        # Новые поля для отслеживания ID сообщений
+        self.current_channel_name = None  # Название текущего канала
+        self.last_exported_message_id = None  # ID последнего экспортированного сообщения
+        self.current_processing_message_id = None  # ID сообщения, которое обрабатывается сейчас
+        self.latest_telegram_message_id = None  # ID последнего сообщения в Telegram канале
         self.check_interval = 30  # Интервал проверки в секундах (по умолчанию 30)
         self.channels_state_file = Path("channels_state.json")  # Файл для сохранения состояния каналов
         
@@ -417,6 +423,31 @@ class ContinuousExporter:
         
         stats_text.append("❌ ", style="red")
         stats_text.append(f"Ошибок: {self.export_stats['errors']}\n\n", style="red")
+        
+        # Информация об ID сообщений
+        if self.current_channel_name:
+            stats_text.append("📋 ID сообщений\n\n", style="bold cyan")
+            stats_text.append(f"Канал: {self.current_channel_name}\n", style="green")
+            
+            if self.last_exported_message_id is not None:
+                stats_text.append(f"Последний экспортированный: {self.last_exported_message_id}\n", style="yellow")
+            
+            if self.current_processing_message_id is not None:
+                stats_text.append(f"Обрабатывается сейчас: {self.current_processing_message_id}\n", style="blue")
+            
+            if self.latest_telegram_message_id is not None:
+                stats_text.append(f"Последний в Telegram: {self.latest_telegram_message_id}\n", style="green")
+            
+            # Показываем прогресс
+            if (self.last_exported_message_id is not None and 
+                self.latest_telegram_message_id is not None):
+                remaining = self.latest_telegram_message_id - self.last_exported_message_id
+                if remaining > 0:
+                    stats_text.append(f"Осталось обработать: {remaining}\n", style="magenta")
+                else:
+                    stats_text.append("✅ Все сообщения обработаны\n", style="green")
+            
+            stats_text.append("\n")
         
         # Время работы
         if hasattr(self, 'start_time'):
@@ -874,6 +905,11 @@ class ContinuousExporter:
                     # Находим сообщение с максимальным ID (это будет реальный последний ID в канале)
                     last_message = max(messages, key=lambda msg: msg.id)
                     
+                    # Обновляем информацию о текущем канале и ID сообщений
+                    self.current_channel_name = channel.title
+                    self.latest_telegram_message_id = last_message.id
+                    self.last_exported_message_id = channel.last_message_id
+                    
                     # Подробное логирование для отладки
                     message_ids = [msg.id for msg in messages]
                     self.filter_logger.debug(f"Channel {channel.title}: Retrieved message IDs: {message_ids}")
@@ -921,6 +957,9 @@ class ContinuousExporter:
                         filtered_messages = 0
                         
                         for message in new_messages:
+                            # Обновляем ID текущего обрабатываемого сообщения
+                            self.current_processing_message_id = message.id
+                            
                             # Получаем текст сообщения для фильтрации
                             message_text = getattr(message, 'text', '') or getattr(message, 'message', '') or ''
                             
@@ -976,6 +1015,9 @@ class ContinuousExporter:
                         channel.last_message_id = last_message.id
                         channel.last_check = datetime.now().isoformat()
                         channel.last_message_date = last_message.date.isoformat()
+                        
+                        # Обновляем ID последнего экспортированного сообщения
+                        self.last_exported_message_id = last_message.id
                         
                         # Обновляем last_message_id в файле .channels
                         self.config_manager.update_channel_last_message_id(channel.id, last_message.id)

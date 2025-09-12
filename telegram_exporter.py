@@ -86,6 +86,12 @@ class ExportStats:
     md_verification_channel: Optional[str] = None  # Текущий канал проверки MD
     md_reexport_count: int = 0                 # Количество повторных экспортов MD
     md_verification_progress: Optional[str] = None  # Прогресс проверки MD файлов
+    
+    # Новые поля для отображения ID сообщений
+    current_channel_name: Optional[str] = None  # Название текущего канала
+    last_exported_message_id: Optional[int] = None  # ID последнего экспортированного сообщения
+    current_processing_message_id: Optional[int] = None  # ID сообщения, которое обрабатывается сейчас
+    latest_telegram_message_id: Optional[int] = None  # ID последнего сообщения в Telegram канале
 
 
 class TelegramExporter:
@@ -1065,6 +1071,30 @@ class TelegramExporter:
             
             stats_text.append(f"{channel_name}\n", style="green")
             
+            # Информация об ID сообщений
+            if self.stats.current_channel_name:
+                stats_text.append("📋 ID сообщений:\n", style="bold cyan")
+                
+                if self.stats.last_exported_message_id is not None:
+                    stats_text.append(f"  Последний экспортированный: {self.stats.last_exported_message_id}\n", style="yellow")
+                
+                if self.stats.current_processing_message_id is not None:
+                    stats_text.append(f"  Обрабатывается сейчас: {self.stats.current_processing_message_id}\n", style="blue")
+                
+                if self.stats.latest_telegram_message_id is not None:
+                    stats_text.append(f"  Последний в Telegram: {self.stats.latest_telegram_message_id}\n", style="green")
+                
+                # Показываем прогресс
+                if (self.stats.last_exported_message_id is not None and 
+                    self.stats.latest_telegram_message_id is not None):
+                    remaining = self.stats.latest_telegram_message_id - self.stats.last_exported_message_id
+                    if remaining > 0:
+                        stats_text.append(f"  Осталось обработать: {remaining}\n", style="magenta")
+                    else:
+                        stats_text.append("  ✅ Все сообщения обработаны\n", style="green")
+                
+                stats_text.append("\n")
+            
             # Прогресс экспорта
             if self.stats.total_messages_in_channel > 0:
                 stats_text.append(f"Сообщений в канале: {self.stats.total_messages_in_channel}\n", style="blue")
@@ -1958,6 +1988,8 @@ class TelegramExporter:
             
             # Обновляем информацию о текущем экспорте
             self.stats.current_export_info = f"Экспорт: {channel.title}"
+            self.stats.current_channel_name = channel.title
+            self.stats.last_exported_message_id = channel.last_message_id
             
             # Создание директории для канала (учет базового каталога из настроек)
             try:
@@ -2169,6 +2201,7 @@ class TelegramExporter:
                                 # Обновляем последний ID сообщения
                                 if message.id > channel.last_message_id:
                                     channel.last_message_id = message.id
+                                    self.stats.last_exported_message_id = message.id
                                     
                             except Exception as e:
                                 self.logger.error(f"Error processing message {message.id}: {e}")
@@ -2231,6 +2264,7 @@ class TelegramExporter:
                             # Обновляем последний ID сообщения
                             if message.id > channel.last_message_id:
                                 channel.last_message_id = message.id
+                                self.stats.last_exported_message_id = message.id
                                 
                         except Exception as e:
                             self.logger.error(f"Error processing message {message.id}: {e}")
