@@ -865,10 +865,20 @@ class ContinuousExporter:
             try:
                 self.filter_logger.debug(f"Getting entity for channel {channel.title}")
                 entity = await self.exporter.client.get_entity(channel.id)
-                messages = await self.exporter.client.get_messages(entity, limit=1)
+                
+                # Получаем несколько последних сообщений чтобы найти сообщение с максимальным ID
+                # Это важно, так как последнее сообщение по времени может не иметь максимальный ID
+                messages = await self.exporter.client.get_messages(entity, limit=10)
                 
                 if messages and len(messages) > 0:
-                    last_message = messages[0]
+                    # Находим сообщение с максимальным ID (это будет реальный последний ID в канале)
+                    last_message = max(messages, key=lambda msg: msg.id)
+                    
+                    # Подробное логирование для отладки
+                    message_ids = [msg.id for msg in messages]
+                    self.filter_logger.debug(f"Channel {channel.title}: Retrieved message IDs: {message_ids}")
+                    self.filter_logger.debug(f"Channel {channel.title}: Max ID found: {last_message.id}")
+                    
                     self.console.print(f"[blue]🔍 Проверка {channel.title}: последнее сообщение ID={last_message.id}, известный ID={channel.last_message_id}[/blue]")
                     self.filter_logger.debug(f"Last message ID: {last_message.id}, known ID: {channel.last_message_id}")
                     

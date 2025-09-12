@@ -2003,7 +2003,9 @@ class TelegramExporter:
                     
                     # Получаем первое и последнее сообщения
                     first_msg = await self.client.get_messages(entity, limit=1, reverse=True)
-                    last_msg = await self.client.get_messages(entity, limit=1)
+                    # Получаем несколько последних сообщений чтобы найти сообщение с максимальным ID
+                    last_messages = await self.client.get_messages(entity, limit=10)
+                    last_msg = [max(last_messages, key=lambda msg: msg.id)] if last_messages else []
                     if first_msg and last_msg and len(first_msg) > 0 and len(last_msg) > 0:
                         # Получаем точное количество сообщений через подсчет
                         message_count = 0
@@ -2029,7 +2031,9 @@ class TelegramExporter:
                 else:
                     # Обычный режим - пытаемся получить примерную оценку количества сообщений
                     first_msg = await self.client.get_messages(entity, limit=1)
-                    last_msg = await self.client.get_messages(entity, limit=1, reverse=True)
+                    # Получаем несколько последних сообщений чтобы найти сообщение с максимальным ID
+                    last_messages = await self.client.get_messages(entity, limit=10)
+                    last_msg = [max(last_messages, key=lambda msg: msg.id)] if last_messages else []
                     if first_msg and last_msg:
                         # Оценка количества сообщений по диапазону ID (не идеально, но быстро)
                         total_messages_in_channel = max(1, last_msg[0].id - first_msg[0].id + 1)
@@ -2646,7 +2650,9 @@ class TelegramExporter:
                 
                 # Получаем первое и последнее сообщения для определения диапазона
                 first_msg = await self.client.get_messages(entity, limit=1, reverse=True)
-                last_msg = await self.client.get_messages(entity, limit=1)
+                # Получаем несколько последних сообщений чтобы найти сообщение с максимальным ID
+                last_messages = await self.client.get_messages(entity, limit=10)
+                last_msg = [max(last_messages, key=lambda msg: msg.id)] if last_messages else []
                 
                 if not first_msg or not last_msg:
                     self.logger.warning(f"Не удалось получить сообщения из канала {channel.title}")
