@@ -1845,7 +1845,7 @@ class TelegramExporter:
             except Exception as e:
                 self.logger.error(f"Could not find entity for channel {channel.title} (ID: {channel.id}): {e}")
                 self.logger.error(f"This might be a user ID instead of a channel ID. Please check your .channels file.")
-                continue
+                return 0
             
             # Получаем новые сообщения (начиная с последнего обработанного ID)
             new_messages = []
@@ -2014,7 +2014,7 @@ class TelegramExporter:
             except Exception as e:
                 self.logger.error(f"Could not find entity for channel {channel.title} (ID: {channel.id}): {e}")
                 self.logger.error(f"This might be a user ID instead of a channel ID. Please check your .channels file.")
-                continue
+                return
             
             # Проверяем наличие MD файла для принятия решения о режиме экспорта
             md_file_path = channel_dir / f"{sanitized_title}.md"
