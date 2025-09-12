@@ -560,11 +560,11 @@ class TelegramExporter:
         """Отправка уведомления через бота"""
         bot_config = self.config_manager.get_bot_config()
         
-        if not bot_config.enabled or not bot_config.bot_token or not bot_config.chat_id:
+        if not bot_config.enabled or not bot_config.token or not bot_config.chat_id:
             return
             
         try:
-            url = f"https://api.telegram.org/bot{bot_config.bot_token}/sendMessage"
+            url = f"https://api.telegram.org/bot{bot_config.token}/sendMessage"
             data = {
                 'chat_id': bot_config.chat_id,
                 'text': message,
@@ -1840,7 +1840,12 @@ class TelegramExporter:
             channel_dir.mkdir(exist_ok=True)
             
             # Получаем канал
-            entity = await self.client.get_entity(channel.id)
+            try:
+                entity = await self.client.get_entity(channel.id)
+            except Exception as e:
+                self.logger.error(f"Could not find entity for channel {channel.title} (ID: {channel.id}): {e}")
+                self.logger.error(f"This might be a user ID instead of a channel ID. Please check your .channels file.")
+                continue
             
             # Получаем новые сообщения (начиная с последнего обработанного ID)
             new_messages = []
@@ -2004,7 +2009,12 @@ class TelegramExporter:
             channel_dir.mkdir(exist_ok=True)
             
             # Получение канала
-            entity = await self.client.get_entity(channel.id)
+            try:
+                entity = await self.client.get_entity(channel.id)
+            except Exception as e:
+                self.logger.error(f"Could not find entity for channel {channel.title} (ID: {channel.id}): {e}")
+                self.logger.error(f"This might be a user ID instead of a channel ID. Please check your .channels file.")
+                continue
             
             # Проверяем наличие MD файла для принятия решения о режиме экспорта
             md_file_path = channel_dir / f"{sanitized_title}.md"
@@ -2137,7 +2147,7 @@ class TelegramExporter:
                 else:
                     min_id = None  # None означает "с самого начала"
             else:
-                self.logger.info(f"Exporting new messages for channel {channel.title} starting from message ID {min_id}")
+                self.logger.info(f"Exporting new messages for channel {channel.title} starting from message ID {min_id if min_id is not None else 'beginning'}")
             
             try:
                 # Используем правильный параметр для получения сообщений

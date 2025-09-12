@@ -895,7 +895,12 @@ class ContinuousExporter:
             # Реальная проверка через Telegram API
             try:
                 self.filter_logger.debug(f"Getting entity for channel {channel.title}")
-                entity = await self.exporter.client.get_entity(channel.id)
+                try:
+                    entity = await self.exporter.client.get_entity(channel.id)
+                except Exception as e:
+                    self.filter_logger.error(f"Could not find entity for channel {channel.title} (ID: {channel.id}): {e}")
+                    self.filter_logger.error(f"This might be a user ID instead of a channel ID. Please check your .channels file.")
+                    return (0, 0)
                 
                 # Получаем несколько последних сообщений чтобы найти сообщение с максимальным ID
                 # Это важно, так как последнее сообщение по времени может не иметь максимальный ID
