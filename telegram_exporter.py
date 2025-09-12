@@ -910,7 +910,7 @@ class TelegramExporter:
         
         # Левая панель - таблица каналов на 100% высоты левой части
         channels_table = self._create_detailed_channels_table()
-        layout["main"]["left"].update(Panel(channels_table, title="Мониторинг каналов", box=box.ROUNDED, expand=True, padding=(0, 0)))
+        layout["main"]["left"].update(Panel(channels_table, title="Мониторинг каналов", box=box.ROUNDED, expand=True))
         
         # Правая панель - детальная статистика
         stats_content = self._create_detailed_statistics()
@@ -930,9 +930,7 @@ class TelegramExporter:
             header_style="bold white", 
             expand=True,
             min_width=80,  # Увеличиваем минимальную ширину
-            collapse_padding=False,  # Убираем сжатие отступов для лучшего вида
-            show_lines=True,  # Показываем линии для лучшей видимости
-            pad_edge=False  # Убираем отступы по краям для максимального использования пространства
+            collapse_padding=False  # Убираем сжатие отступов для лучшего вида
         )
         channels_table.add_column("Канал", style="green", no_wrap=False, ratio=4)
         channels_table.add_column("Последняя проверка", style="blue", no_wrap=True, ratio=2)
