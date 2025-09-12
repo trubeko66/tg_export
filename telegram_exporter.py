@@ -902,19 +902,19 @@ class TelegramExporter:
             header_text.append(f" | {self.stats.current_export_info}", style="yellow")
         layout["header"].update(Panel(header_text, box=box.DOUBLE))
         
-        # Главная область - разделена на левую и правую панели (3:1) для большего места таблице
-        layout["main"].split_row(
-            Layout(name="left", ratio=3),
-            Layout(name="right", ratio=1)
+        # Главная область - разделена на верхнюю и нижнюю панели (4:1) для полной высоты таблице
+        layout["main"].split_column(
+            Layout(name="top", ratio=4),
+            Layout(name="bottom", ratio=1)
         )
         
-        # Левая панель - оптимизированная таблица каналов с полным растягиванием
+        # Верхняя панель - таблица каналов на всю высоту экрана
         channels_table = self._create_detailed_channels_table()
-        layout["main"]["left"].update(Panel(channels_table, title="Мониторинг каналов", box=box.ROUNDED, expand=True))
+        layout["main"]["top"].update(Panel(channels_table, title="Мониторинг каналов", box=box.ROUNDED, expand=True))
         
-        # Правая панель - детальная статистика
+        # Нижняя панель - детальная статистика
         stats_content = self._create_detailed_statistics()
-        layout["main"]["right"].update(Panel(stats_content, title="Статистика", box=box.ROUNDED))
+        layout["main"]["bottom"].update(Panel(stats_content, title="Статистика", box=box.ROUNDED))
         
         # Добавляем информацию о подвале
         footer_content = self._create_footer_info()
