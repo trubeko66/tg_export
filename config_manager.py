@@ -78,7 +78,19 @@ class ConfigManager:
     def __init__(self, config_file: str = ".config.json"):
         self.config_file = Path(config_file)
         self.console = Console()
-        self.config = self._load_config()
+        try:
+            self.config = self._load_config()
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️ Ошибка загрузки конфигурации: {e}[/yellow]")
+            self.console.print("[yellow]Создается конфигурация по умолчанию[/yellow]")
+            # Создаем конфигурацию по умолчанию
+            self.config = AppConfig(
+                telegram=TelegramConfig(),
+                bot=BotConfig(),
+                first_run=True,
+                storage=StorageConfig(),
+                webdav=WebDavConfig()
+            )
     
     def _load_config(self) -> AppConfig:
         """Загрузка конфигурации из файла"""

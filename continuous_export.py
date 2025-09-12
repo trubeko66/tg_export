@@ -62,58 +62,99 @@ class ContinuousExporter:
         self._setup_filter_logger()
         
         # Настройка обработчика сигналов для корректного завершения
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
+        try:
+            signal.signal(signal.SIGINT, self._signal_handler)
+            signal.signal(signal.SIGTERM, self._signal_handler)
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️ Не удалось настроить обработчики сигналов: {e}[/yellow]")
     
     def _setup_filter_logger(self):
         """Настройка логгера для фильтрации сообщений"""
-        # Создаем отдельный логгер для фильтрации
-        self.filter_logger = logging.getLogger('ads_filter')
-        self.filter_logger.setLevel(logging.DEBUG)
-        
-        # Удаляем существующие обработчики, если есть
-        for handler in self.filter_logger.handlers[:]:
-            self.filter_logger.removeHandler(handler)
-        
-        # Создаем обработчик для файла ads.log
-        file_handler = logging.FileHandler('ads.log', encoding='utf-8')
-        file_handler.setLevel(logging.DEBUG)
-        
-        # Расширенный формат лога с дополнительной информацией
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - [%(name)s] - %(funcName)s:%(lineno)d - %(message)s')
-        file_handler.setFormatter(formatter)
-        
-        # Добавляем обработчик к логгеру
-        self.filter_logger.addHandler(file_handler)
-        
-        # Предотвращаем дублирование сообщений
-        self.filter_logger.propagate = False
-        
-        # Настраиваем логгер для export.log
-        self._setup_export_logger()
+        try:
+            # Создаем отдельный логгер для фильтрации
+            self.filter_logger = logging.getLogger('ads_filter')
+            self.filter_logger.setLevel(logging.DEBUG)
+            
+            # Удаляем существующие обработчики, если есть
+            for handler in self.filter_logger.handlers[:]:
+                self.filter_logger.removeHandler(handler)
+            
+            # Создаем обработчик для файла ads.log с обработкой ошибок
+            try:
+                file_handler = logging.FileHandler('ads.log', encoding='utf-8')
+                file_handler.setLevel(logging.DEBUG)
+                
+                # Расширенный формат лога с дополнительной информацией
+                formatter = logging.Formatter('%(asctime)s - %(levelname)s - [%(name)s] - %(funcName)s:%(lineno)d - %(message)s')
+                file_handler.setFormatter(formatter)
+                
+                # Добавляем обработчик к логгеру
+                self.filter_logger.addHandler(file_handler)
+            except Exception as e:
+                # Если не удается создать файловый обработчик, используем консольный
+                console_handler = logging.StreamHandler()
+                console_handler.setLevel(logging.DEBUG)
+                formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+                console_handler.setFormatter(formatter)
+                self.filter_logger.addHandler(console_handler)
+                self.console.print(f"[yellow]⚠️ Не удалось создать файл ads.log, используется консольный лог: {e}[/yellow]")
+            
+            # Предотвращаем дублирование сообщений
+            self.filter_logger.propagate = False
+            
+            # Настраиваем логгер для export.log
+            self._setup_export_logger()
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка настройки логгера: {e}[/red]")
+            # Создаем простой логгер без файлов
+            self.filter_logger = logging.getLogger('ads_filter')
+            self.filter_logger.setLevel(logging.INFO)
+            console_handler = logging.StreamHandler()
+            self.filter_logger.addHandler(console_handler)
+            self.filter_logger.propagate = False
     
     def _setup_export_logger(self):
         """Настройка логгера для export.log"""
-        self.export_logger = logging.getLogger('export')
-        self.export_logger.setLevel(logging.INFO)
-        
-        # Удаляем существующие обработчики
-        for handler in self.export_logger.handlers[:]:
-            self.export_logger.removeHandler(handler)
-        
-        # Создаем обработчик для файла export.log
-        file_handler = logging.FileHandler('export.log', encoding='utf-8')
-        file_handler.setLevel(logging.INFO)
-        
-        # Формат лога согласно техническому заданию
-        formatter = logging.Formatter('[%(asctime)s] %(levelname)s - %(message)s')
-        file_handler.setFormatter(formatter)
-        
-        # Добавляем обработчик к логгеру
-        self.export_logger.addHandler(file_handler)
-        
-        # Предотвращаем дублирование сообщений
-        self.export_logger.propagate = False
+        try:
+            self.export_logger = logging.getLogger('export')
+            self.export_logger.setLevel(logging.INFO)
+            
+            # Удаляем существующие обработчики
+            for handler in self.export_logger.handlers[:]:
+                self.export_logger.removeHandler(handler)
+            
+            # Создаем обработчик для файла export.log с обработкой ошибок
+            try:
+                file_handler = logging.FileHandler('export.log', encoding='utf-8')
+                file_handler.setLevel(logging.INFO)
+                
+                # Формат лога согласно техническому заданию
+                formatter = logging.Formatter('[%(asctime)s] %(levelname)s - %(message)s')
+                file_handler.setFormatter(formatter)
+                
+                # Добавляем обработчик к логгеру
+                self.export_logger.addHandler(file_handler)
+            except Exception as e:
+                # Если не удается создать файловый обработчик, используем консольный
+                console_handler = logging.StreamHandler()
+                console_handler.setLevel(logging.INFO)
+                formatter = logging.Formatter('[%(asctime)s] %(levelname)s - %(message)s')
+                console_handler.setFormatter(formatter)
+                self.export_logger.addHandler(console_handler)
+                self.console.print(f"[yellow]⚠️ Не удалось создать файл export.log, используется консольный лог: {e}[/yellow]")
+            
+            # Предотвращаем дублирование сообщений
+            self.export_logger.propagate = False
+            
+        except Exception as e:
+            self.console.print(f"[red]❌ Ошибка настройки export логгера: {e}[/red]")
+            # Создаем простой логгер без файлов
+            self.export_logger = logging.getLogger('export')
+            self.export_logger.setLevel(logging.INFO)
+            console_handler = logging.StreamHandler()
+            self.export_logger.addHandler(console_handler)
+            self.export_logger.propagate = False
     
     def _signal_handler(self, signum, frame):
         """Обработчик сигналов для корректного завершения"""
