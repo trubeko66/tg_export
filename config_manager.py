@@ -278,7 +278,7 @@ class ConfigManager:
         # Telegram API
         table.add_row(
             "API ID", 
-            self.config.telegram.api_id[:10] + "..." if self.config.telegram.api_id and len(self.config.telegram.api_id) > 10 else self.config.telegram.api_id or "Не задано",
+            str(self.config.telegram.api_id)[:10] + "..." if self.config.telegram.api_id and len(str(self.config.telegram.api_id)) > 10 else str(self.config.telegram.api_id) if self.config.telegram.api_id else "Не задано",
             "✓ Настроено" if self.config.telegram.api_id else "✗ Не настроено"
         )
         
