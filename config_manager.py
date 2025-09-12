@@ -310,7 +310,7 @@ class ConfigManager:
             
             table.add_row(
                 "Chat ID", 
-                self.config.bot.chat_id or "Не задано",
+                str(self.config.bot.chat_id) if self.config.bot.chat_id else "Не задано",
                 "✓ Настроено" if self.config.bot.chat_id else "✗ Не настроено"
             )
         

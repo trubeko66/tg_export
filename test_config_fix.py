@@ -22,21 +22,27 @@ def test_config_display():
         # Создаем менеджер конфигурации
         config_manager = ConfigManager()
         
-        # Тестируем с различными типами api_id
+        # Тестируем с различными типами api_id и chat_id
         test_cases = [
-            ("Число", 1234567890),
-            ("Строка", "1234567890"),
-            ("Длинная строка", "12345678901234567890"),
-            ("None", None),
-            ("Пустая строка", ""),
+            ("API ID - Число", "api_id", 1234567890),
+            ("API ID - Строка", "api_id", "1234567890"),
+            ("API ID - Длинная строка", "api_id", "12345678901234567890"),
+            ("API ID - None", "api_id", None),
+            ("API ID - Пустая строка", "api_id", ""),
+            ("Chat ID - Число", "chat_id", 1234567890),
+            ("Chat ID - Строка", "chat_id", "1234567890"),
+            ("Chat ID - None", "chat_id", None),
         ]
         
-        for test_name, api_id_value in test_cases:
-            console.print(f"\n[cyan]Тест: {test_name} = {api_id_value}[/cyan]")
+        for test_name, field_name, test_value in test_cases:
+            console.print(f"\n[cyan]Тест: {test_name} = {test_value}[/cyan]")
             
             # Устанавливаем тестовое значение
             if config_manager.config and hasattr(config_manager.config, 'telegram'):
-                config_manager.config.telegram.api_id = api_id_value
+                if field_name == "api_id":
+                    config_manager.config.telegram.api_id = test_value
+                elif field_name == "chat_id" and hasattr(config_manager.config, 'bot'):
+                    config_manager.config.bot.chat_id = test_value
                 
                 # Пытаемся отобразить конфигурацию
                 try:
