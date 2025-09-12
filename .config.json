@@ -5,8 +5,9 @@
     "phone": null
   },
   "bot": {
-    "bot_token": null,
+    "token": null,
     "chat_id": null,
+    "notifications": true,
     "enabled": false
   },
   "first_run": false,

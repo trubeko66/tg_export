@@ -902,9 +902,9 @@ class TelegramExporter:
             header_text.append(f" | {self.stats.current_export_info}", style="yellow")
         layout["header"].update(Panel(header_text, box=box.DOUBLE))
         
-        # Главная область - разделена на левую и правую панели (2:1)
+        # Главная область - разделена на левую и правую панели (3:1) для большего места таблице
         layout["main"].split_row(
-            Layout(name="left", ratio=2),
+            Layout(name="left", ratio=3),
             Layout(name="right", ratio=1)
         )
         
@@ -929,13 +929,13 @@ class TelegramExporter:
             show_header=True, 
             header_style="bold white", 
             expand=True,
-            min_width=60,  # Минимальная ширина
-            collapse_padding=True  # Уменьшаем отступы для экономии места
+            min_width=80,  # Увеличиваем минимальную ширину
+            collapse_padding=False  # Убираем сжатие отступов для лучшего вида
         )
-        channels_table.add_column("Канал", style="green", no_wrap=False, ratio=3)
-        channels_table.add_column("Проверка", style="blue", no_wrap=True, ratio=2)
+        channels_table.add_column("Канал", style="green", no_wrap=False, ratio=4)
+        channels_table.add_column("Последняя проверка", style="blue", no_wrap=True, ratio=2)
         channels_table.add_column("Сообщений", style="yellow", justify="right", no_wrap=True, ratio=1)
-        channels_table.add_column("Статус", style="white", no_wrap=True, ratio=2)
+        channels_table.add_column("Статус", style="cyan", justify="center", no_wrap=True, ratio=1)
         
         if not self.channels:
             channels_table.add_row(
@@ -1036,11 +1036,16 @@ class TelegramExporter:
         return channels_table
 
     def _create_detailed_statistics(self) -> Text:
-        """Создает детальную статистику для правой панели"""
+        """Создает детальную статистику для правой панели с анимацией"""
         stats_text = Text()
         
-        # Основная статистика
-        stats_text.append("📊 Общая статистика\n\n", style="bold cyan")
+        # Анимированные иконки
+        animation_chars = ["📊", "📈", "📉", "📊"]
+        current_time = int(time.time() * 2) % len(animation_chars)
+        animation = animation_chars[current_time]
+        
+        # Основная статистика с анимацией
+        stats_text.append(f"{animation} Общая статистика\n\n", style="bold cyan")
         stats_text.append(f"Каналов: {self.stats.total_channels}\n", style="green")
         
         # Отображаем обнаруженные и экспортированные сообщения
@@ -1053,14 +1058,18 @@ class TelegramExporter:
         stats_text.append(f"Данных: {self.stats.total_size_mb:.1f} МБ\n", style="cyan")
         stats_text.append(f"Ошибок: {self.stats.export_errors}\n\n", style="red")
         
-        # Статистика фильтрации
+        # Статистика фильтрации с анимацией
         if self.stats.filtered_messages > 0:
-            stats_text.append("🔍 Фильтрация\n\n", style="bold magenta")
+            filter_animation = ["🔍", "🚫", "🔍", "🚫"]
+            filter_icon = filter_animation[current_time % len(filter_animation)]
+            stats_text.append(f"{filter_icon} Фильтрация\n\n", style="bold magenta")
             stats_text.append(f"Отфильтровано: {self.stats.filtered_messages}\n\n", style="magenta")
         
-        # Текущий экспорт
+        # Текущий экспорт с анимацией
         if self.stats.current_export_info:
-            stats_text.append("⚡ Текущий экспорт\n\n", style="bold green")
+            export_animation = ["⚡", "🚀", "⚡", "🚀"]
+            export_icon = export_animation[current_time % len(export_animation)]
+            stats_text.append(f"{export_icon} Текущий экспорт\n\n", style="bold green")
             
             # Извлекаем название канала без дополнительной информации
             export_info = self.stats.current_export_info
@@ -1071,9 +1080,11 @@ class TelegramExporter:
             
             stats_text.append(f"{channel_name}\n", style="green")
             
-            # Информация об ID сообщений
+            # Информация об ID сообщений с анимацией
             if self.stats.current_channel_name:
-                stats_text.append("📋 ID сообщений:\n", style="bold cyan")
+                id_animation = ["📋", "🔢", "📋", "🔢"]
+                id_icon = id_animation[current_time % len(id_animation)]
+                stats_text.append(f"{id_icon} ID сообщений:\n", style="bold cyan")
                 
                 if self.stats.last_exported_message_id is not None:
                     stats_text.append(f"  Последний экспортированный: {self.stats.last_exported_message_id}\n", style="yellow")
@@ -1084,14 +1095,18 @@ class TelegramExporter:
                 if self.stats.latest_telegram_message_id is not None:
                     stats_text.append(f"  Последний в Telegram: {self.stats.latest_telegram_message_id}\n", style="green")
                 
-                # Показываем прогресс
+                # Показываем прогресс с анимацией
                 if (self.stats.last_exported_message_id is not None and 
                     self.stats.latest_telegram_message_id is not None):
                     remaining = self.stats.latest_telegram_message_id - self.stats.last_exported_message_id
                     if remaining > 0:
-                        stats_text.append(f"  Осталось обработать: {remaining}\n", style="magenta")
+                        progress_animation = ["⏳", "🔄", "⏳", "🔄"]
+                        progress_icon = progress_animation[current_time % len(progress_animation)]
+                        stats_text.append(f"  {progress_icon} Осталось: {remaining}\n", style="magenta")
                     else:
-                        stats_text.append("  ✅ Все сообщения обработаны\n", style="green")
+                        complete_animation = ["✅", "🎉", "✅", "🎉"]
+                        complete_icon = complete_animation[current_time % len(complete_animation)]
+                        stats_text.append(f"  {complete_icon} Все обработано\n", style="green")
                 
                 stats_text.append("\n")
             
@@ -1099,12 +1114,16 @@ class TelegramExporter:
             if self.stats.total_messages_in_channel > 0:
                 stats_text.append(f"Сообщений в канале: {self.stats.total_messages_in_channel}\n", style="blue")
             
-            # Скорость загрузки
+            # Скорость загрузки с анимацией
             if self.stats.download_speed_files_per_sec > 0:
-                stats_text.append(f"Скорость: {self.stats.download_speed_files_per_sec:.1f} ф/с\n", style="blue")
+                speed_animation = ["💨", "⚡", "💨", "⚡"]
+                speed_icon = speed_animation[current_time % len(speed_animation)]
+                stats_text.append(f"{speed_icon} Скорость: {self.stats.download_speed_files_per_sec:.1f} ф/с\n", style="blue")
             
             if self.stats.download_speed_mb_per_sec > 0:
-                stats_text.append(f"Скорость: {self.stats.download_speed_mb_per_sec:.1f} МБ/с\n", style="blue")
+                speed_animation = ["💨", "⚡", "💨", "⚡"]
+                speed_icon = speed_animation[current_time % len(speed_animation)]
+                stats_text.append(f"{speed_icon} Скорость: {self.stats.download_speed_mb_per_sec:.1f} МБ/с\n", style="blue")
             
             # Осталось файлов - отображаем только если больше 0
             if self.stats.remaining_files_to_download > 0:
