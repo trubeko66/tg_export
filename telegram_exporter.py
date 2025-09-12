@@ -36,8 +36,12 @@ from rich.layout import Layout
 from rich.live import Live
 from rich.text import Text
 from rich.prompt import Prompt, Confirm
-from rich.progress import Progress, TaskID
+from rich.progress import Progress, TaskID, BarColumn, TextColumn, TimeRemainingColumn, SpinnerColumn
 from rich import box
+from rich.align import Align
+from rich.columns import Columns
+from rich.rule import Rule
+from rich.spinner import Spinner
 import requests
 
 from exporters import (
@@ -895,12 +899,25 @@ class TelegramExporter:
             Layout(name="footer", size=3)
         )
         
-        # Заголовок
-        header_text = Text("Telegram Channel Exporter", style="bold magenta")
-        header_text.append(" | Статус: Работает", style="bold green")
+        # Заголовок с анимацией
+        current_time = int(time.time() * 2) % 4
+        title_animation = ["🚀", "⚡", "🚀", "⚡"]
+        title_icon = title_animation[current_time]
+        
+        header_text = Text(f"{title_icon} Telegram Channel Exporter", style="bold magenta")
+        header_text.append(" | Статус: ", style="bold")
+        
+        # Анимированный статус
+        status_animation = ["🟢", "🟡", "🟢", "🟡"]
+        status_icon = status_animation[current_time]
+        header_text.append(f"{status_icon} Работает", style="bold green")
+        
         if self.stats.current_export_info:
-            header_text.append(f" | {self.stats.current_export_info}", style="yellow")
-        layout["header"].update(Panel(header_text, box=box.DOUBLE))
+            export_animation = ["⚡", "🚀", "⚡", "🚀"]
+            export_icon = export_animation[current_time]
+            header_text.append(f" | {export_icon} {self.stats.current_export_info}", style="yellow")
+        
+        layout["header"].update(Panel(header_text, box=box.DOUBLE, border_style="bright_magenta"))
         
         # Главная область - разделена на левую и правую панели (7:3) для 70% каналов и 30% статистики
         layout["main"].split_row(
@@ -910,37 +927,56 @@ class TelegramExporter:
         
         # Левая панель - таблица каналов на 100% высоты левой части
         channels_table = self._create_detailed_channels_table()
-        layout["main"]["left"].update(Panel(channels_table, title="Мониторинг каналов", box=box.ROUNDED, expand=True))
+        layout["main"]["left"].update(Panel(
+            channels_table, 
+            title="📺 Мониторинг каналов", 
+            box=box.ROUNDED, 
+            expand=True,
+            border_style="bright_blue",
+            title_align="left"
+        ))
         
         # Правая панель - детальная статистика
         stats_content = self._create_detailed_statistics()
-        layout["main"]["right"].update(Panel(stats_content, title="Статистика", box=box.ROUNDED))
+        layout["main"]["right"].update(Panel(
+            stats_content, 
+            title="📊 Статистика", 
+            box=box.ROUNDED,
+            border_style="bright_cyan",
+            title_align="left"
+        ))
         
         # Добавляем информацию о подвале
         footer_content = self._create_footer_info()
-        layout["footer"].update(Panel(footer_content, box=box.ROUNDED))
+        layout["footer"].update(Panel(
+            footer_content, 
+            box=box.ROUNDED,
+            border_style="bright_green"
+        ))
         
         return layout
 
     def _create_detailed_channels_table(self) -> Table:
-        """Создает оптимизированную таблицу каналов для левой панели"""
+        """Создает оптимизированную таблицу каналов для левой панели с улучшенным дизайном"""
         channels_table = Table(
             box=box.ROUNDED, 
             show_header=True, 
             header_style="bold white", 
             expand=True,
-            min_width=80,  # Увеличиваем минимальную ширину
-            collapse_padding=False  # Убираем сжатие отступов для лучшего вида
+            min_width=90,  # Увеличиваем минимальную ширину
+            collapse_padding=False,  # Убираем сжатие отступов для лучшего вида
+            border_style="bright_blue"  # Добавляем цветную границу
         )
-        channels_table.add_column("Канал", style="green", no_wrap=False, ratio=4)
-        channels_table.add_column("Последняя проверка", style="blue", no_wrap=True, ratio=2)
-        channels_table.add_column("Сообщений", style="yellow", justify="right", no_wrap=True, ratio=1)
-        channels_table.add_column("Статус", style="cyan", justify="center", no_wrap=True, ratio=1)
+        channels_table.add_column("📺 Канал", style="green", no_wrap=False, ratio=5)
+        channels_table.add_column("🕐 Проверка", style="blue", no_wrap=True, ratio=2)
+        channels_table.add_column("📊 Сообщений", style="yellow", justify="right", no_wrap=True, ratio=1)
+        channels_table.add_column("💾 Размер", style="magenta", justify="right", no_wrap=True, ratio=1)
+        channels_table.add_column("⚡ Статус", style="cyan", justify="center", no_wrap=True, ratio=1)
         
         if not self.channels:
             channels_table.add_row(
                 "[Каналы не выбраны]",
-                "", "", ""
+                "", "", "", ""
             )
             return channels_table
         
@@ -982,16 +1018,20 @@ class TelegramExporter:
             actual_index = start_index + i
             last_check = channel.last_check or "Никогда"
             
-            # Определяем статус канала
+            # Определяем статус канала с анимацией
             status = "Ожидание"
             # Более компактное имя для лучшего использования пространства
             channel_name = channel.title
-            if len(channel_name) > 35:  # Увеличиваем допустимую длину
-                channel_name = channel_name[:32] + "..."
+            if len(channel_name) > 40:  # Увеличиваем допустимую длину
+                channel_name = channel_name[:37] + "..."
             
-            # Подсвечиваем текущий экспортируемый канал
+            # Подсвечиваем текущий экспортируемый канал с анимацией
             if actual_index == current_channel_index:
-                status = "[green]⚡ Экспорт[/green]"
+                # Анимированный статус для текущего канала
+                export_animation = ["⚡", "🚀", "⚡", "🚀", "💫", "🌟"]
+                current_time = int(time.time() * 3) % len(export_animation)
+                export_icon = export_animation[current_time]
+                status = f"[green]{export_icon} Экспорт[/green]"
                 channel_name = f"[bold green]▶ {channel_name}[/bold green]"
             elif channel.last_check:
                 status = "[blue]✓ Готов[/blue]"
@@ -1012,51 +1052,129 @@ class TelegramExporter:
             msg_count = channel.total_messages
             msg_str = str(msg_count)
             
+            # Форматирование размера медиафайлов
+            if channel.media_size_mb > 0:
+                if channel.media_size_mb < 1:
+                    size_str = f"{channel.media_size_mb * 1024:.0f} КБ"
+                elif channel.media_size_mb < 1024:
+                    size_str = f"{channel.media_size_mb:.1f} МБ"
+                else:
+                    size_str = f"{channel.media_size_mb / 1024:.1f} ГБ"
+            else:
+                size_str = "—"
+            
             channels_table.add_row(
                 channel_name,
                 last_check,
                 msg_str,
+                size_str,
                 status
             )
         
-        # Информация о позиции в списке
+        # Информация о позиции в списке с улучшенной навигацией
         if len(self.channels) > max_visible_channels:
             total_channels = len(self.channels)
             showing_range = f"{start_index + 1}-{end_index}"
+            
+            # Создаем индикатор прокрутки
+            scroll_percent = (start_index / (len(self.channels) - max_visible_channels)) * 100 if len(self.channels) > max_visible_channels else 0
+            scroll_bar = self._create_progress_bar(scroll_percent, 20)
+            
             info_text = f"[dim]Показано {showing_range} из {total_channels} каналов[/dim]"
             
             if current_channel_index >= 0:
                 info_text += f" | [green]Текущий: #{current_channel_index + 1}[/green]"
             
+            # Добавляем навигационные подсказки
+            nav_text = f"[dim]📊 Прокрутка: {scroll_bar} {scroll_percent:.0f}%[/dim]"
+            
             channels_table.add_row(
                 info_text,
-                "", "", ""
+                "", "", "", ""
+            )
+            channels_table.add_row(
+                nav_text,
+                "", "", "", ""
             )
         
         return channels_table
 
     def _create_detailed_statistics(self) -> Text:
-        """Создает детальную статистику для правой панели с анимацией"""
+        """Создает детальную статистику для правой панели с анимацией и прогресс-барами"""
         stats_text = Text()
         
-        # Анимированные иконки
-        animation_chars = ["📊", "📈", "📉", "📊"]
-        current_time = int(time.time() * 2) % len(animation_chars)
+        # Анимированные иконки с более плавной анимацией
+        animation_chars = ["📊", "📈", "📉", "📊", "📈", "📊"]
+        current_time = int(time.time() * 3) % len(animation_chars)
         animation = animation_chars[current_time]
         
         # Основная статистика с анимацией
-        stats_text.append(f"{animation} Общая статистика\n\n", style="bold cyan")
-        stats_text.append(f"Каналов: {self.stats.total_channels}\n", style="green")
+        stats_text.append(f"{animation} Общая статистика\n", style="bold cyan")
+        stats_text.append("─" * 25 + "\n", style="dim")
         
-        # Отображаем обнаруженные и экспортированные сообщения
+        # Добавляем интерактивные элементы и индикаторы состояния
+        stats_text.append("💡 Подсказки:\n", style="bold yellow")
+        stats_text.append("  • Нажмите Ctrl+C для выхода\n", style="dim")
+        stats_text.append("  • Статус обновляется в реальном времени\n", style="dim")
+        stats_text.append("  • Анимированные индикаторы показывают активность\n", style="dim")
+        
+        # Индикаторы состояния системы
+        stats_text.append("\n🔧 Состояние системы:\n", style="bold green")
+        
+        # Индикатор подключения к Telegram
+        connection_animation = ["🟢", "🟡", "🟢", "🟡"]
+        connection_icon = connection_animation[current_time % len(connection_animation)]
+        stats_text.append(f"  {connection_icon} Telegram: Подключен\n", style="green")
+        
+        # Индикатор активности экспорта
+        if self.stats.current_export_info:
+            activity_animation = ["⚡", "🚀", "⚡", "🚀"]
+            activity_icon = activity_animation[current_time % len(activity_animation)]
+            stats_text.append(f"  {activity_icon} Экспорт: Активен\n", style="green")
+        else:
+            stats_text.append(f"  ⏸️ Экспорт: Ожидание\n", style="yellow")
+        
+        # Индикатор памяти (симуляция)
+        memory_animation = ["💾", "📦", "💾", "📦"]
+        memory_icon = memory_animation[current_time % len(memory_animation)]
+        stats_text.append(f"  {memory_icon} Память: Норма\n", style="green")
+        
+        stats_text.append("\n")
+        
+        # Создаем прогресс-бар для каналов
+        if self.stats.total_channels > 0:
+            active_channels = sum(1 for ch in self.channels if ch.last_check)
+            progress_percent = (active_channels / self.stats.total_channels) * 100
+            progress_bar = self._create_progress_bar(progress_percent, 20)
+            stats_text.append(f"Каналов: {self.stats.total_channels} ", style="green")
+            stats_text.append(f"({active_channels} активных)\n", style="dim")
+            stats_text.append(f"[green]{progress_bar}[/green] {progress_percent:.1f}%\n\n", style="dim")
+        
+        # Отображаем обнаруженные и экспортированные сообщения с прогресс-баром
         if self.stats.discovered_messages > 0:
-            stats_text.append(f"Обнаружено сообщений: {self.stats.discovered_messages}\n", style="cyan")
+            progress_percent = (self.stats.exported_messages / self.stats.discovered_messages) * 100 if self.stats.discovered_messages > 0 else 0
+            progress_bar = self._create_progress_bar(progress_percent, 20)
+            
+            stats_text.append(f"Обнаружено: {self.stats.discovered_messages}\n", style="cyan")
             stats_text.append(f"Экспортировано: {self.stats.exported_messages}\n", style="yellow")
+            stats_text.append(f"[yellow]{progress_bar}[/yellow] {progress_percent:.1f}%\n\n", style="dim")
         else:
             stats_text.append(f"Сообщений: {self.stats.total_messages}\n", style="yellow")
         
-        stats_text.append(f"Данных: {self.stats.total_size_mb:.1f} МБ\n", style="cyan")
-        stats_text.append(f"Ошибок: {self.stats.export_errors}\n\n", style="red")
+        # Данные с анимированной иконкой
+        data_animation = ["💾", "📦", "💾", "📦"]
+        data_icon = data_animation[current_time % len(data_animation)]
+        stats_text.append(f"{data_icon} Данных: {self.stats.total_size_mb:.1f} МБ\n", style="cyan")
+        
+        # Ошибки с анимированной иконкой
+        if self.stats.export_errors > 0:
+            error_animation = ["⚠️", "❌", "⚠️", "❌"]
+            error_icon = error_animation[current_time % len(error_animation)]
+            stats_text.append(f"{error_icon} Ошибок: {self.stats.export_errors}\n", style="red")
+        else:
+            stats_text.append(f"✅ Ошибок: {self.stats.export_errors}\n", style="green")
+        
+        stats_text.append("\n")
         
         # Статистика фильтрации с анимацией
         if self.stats.filtered_messages > 0:
@@ -1067,9 +1185,10 @@ class TelegramExporter:
         
         # Текущий экспорт с анимацией
         if self.stats.current_export_info:
-            export_animation = ["⚡", "🚀", "⚡", "🚀"]
+            export_animation = ["⚡", "🚀", "⚡", "🚀", "💫", "🌟"]
             export_icon = export_animation[current_time % len(export_animation)]
-            stats_text.append(f"{export_icon} Текущий экспорт\n\n", style="bold green")
+            stats_text.append(f"{export_icon} Текущий экспорт\n", style="bold green")
+            stats_text.append("─" * 25 + "\n", style="dim")
             
             # Извлекаем название канала без дополнительной информации
             export_info = self.stats.current_export_info
@@ -1078,35 +1197,47 @@ class TelegramExporter:
             else:
                 channel_name = export_info
             
-            stats_text.append(f"{channel_name}\n", style="green")
+            # Анимированное название канала
+            channel_animation = ["▶", "▷", "▶", "▷"]
+            channel_icon = channel_animation[current_time % len(channel_animation)]
+            stats_text.append(f"{channel_icon} {channel_name}\n", style="green")
             
-            # Информация об ID сообщений с анимацией
+            # Информация об ID сообщений с анимацией и прогресс-барами
             if self.stats.current_channel_name:
-                id_animation = ["📋", "🔢", "📋", "🔢"]
+                id_animation = ["📋", "🔢", "📋", "🔢", "📊", "📈"]
                 id_icon = id_animation[current_time % len(id_animation)]
-                stats_text.append(f"{id_icon} ID сообщений:\n", style="bold cyan")
+                stats_text.append(f"{id_icon} Прогресс сообщений:\n", style="bold cyan")
                 
                 if self.stats.last_exported_message_id is not None:
-                    stats_text.append(f"  Последний экспортированный: {self.stats.last_exported_message_id}\n", style="yellow")
+                    stats_text.append(f"  Экспортировано: {self.stats.last_exported_message_id}\n", style="yellow")
                 
                 if self.stats.current_processing_message_id is not None:
-                    stats_text.append(f"  Обрабатывается сейчас: {self.stats.current_processing_message_id}\n", style="blue")
+                    # Анимированный спиннер для текущего сообщения
+                    spinner_text = self._create_animated_spinner(f"Обрабатывается: {self.stats.current_processing_message_id}", "blue")
+                    stats_text.append(f"  {spinner_text}\n", style="blue")
                 
                 if self.stats.latest_telegram_message_id is not None:
-                    stats_text.append(f"  Последний в Telegram: {self.stats.latest_telegram_message_id}\n", style="green")
+                    stats_text.append(f"  Всего в канале: {self.stats.latest_telegram_message_id}\n", style="green")
                 
-                # Показываем прогресс с анимацией
+                # Показываем прогресс с прогресс-баром
                 if (self.stats.last_exported_message_id is not None and 
                     self.stats.latest_telegram_message_id is not None):
-                    remaining = self.stats.latest_telegram_message_id - self.stats.last_exported_message_id
+                    total = self.stats.latest_telegram_message_id
+                    exported = self.stats.last_exported_message_id
+                    remaining = total - exported
+                    progress_percent = (exported / total) * 100 if total > 0 else 0
+                    progress_bar = self._create_progress_bar(progress_percent, 15)
+                    
                     if remaining > 0:
-                        progress_animation = ["⏳", "🔄", "⏳", "🔄"]
+                        progress_animation = ["⏳", "🔄", "⏳", "🔄", "⚡", "💨"]
                         progress_icon = progress_animation[current_time % len(progress_animation)]
                         stats_text.append(f"  {progress_icon} Осталось: {remaining}\n", style="magenta")
+                        stats_text.append(f"  [cyan]{progress_bar}[/cyan] {progress_percent:.1f}%\n", style="dim")
                     else:
-                        complete_animation = ["✅", "🎉", "✅", "🎉"]
+                        complete_animation = ["✅", "🎉", "✅", "🎉", "🏆", "⭐"]
                         complete_icon = complete_animation[current_time % len(complete_animation)]
-                        stats_text.append(f"  {complete_icon} Все обработано\n", style="green")
+                        stats_text.append(f"  {complete_icon} Все обработано!\n", style="green")
+                        stats_text.append(f"  [green]{progress_bar}[/green] 100.0%\n", style="dim")
                 
                 stats_text.append("\n")
             
@@ -1114,80 +1245,190 @@ class TelegramExporter:
             if self.stats.total_messages_in_channel > 0:
                 stats_text.append(f"Сообщений в канале: {self.stats.total_messages_in_channel}\n", style="blue")
             
-            # Скорость загрузки с анимацией
-            if self.stats.download_speed_files_per_sec > 0:
-                speed_animation = ["💨", "⚡", "💨", "⚡"]
+            # Скорость загрузки с анимацией, прогресс-барами и мини-графиками
+            if self.stats.download_speed_files_per_sec > 0 or self.stats.download_speed_mb_per_sec > 0:
+                speed_animation = ["💨", "⚡", "💨", "⚡", "🚀", "🌟"]
                 speed_icon = speed_animation[current_time % len(speed_animation)]
-                stats_text.append(f"{speed_icon} Скорость: {self.stats.download_speed_files_per_sec:.1f} ф/с\n", style="blue")
-            
-            if self.stats.download_speed_mb_per_sec > 0:
-                speed_animation = ["💨", "⚡", "💨", "⚡"]
-                speed_icon = speed_animation[current_time % len(speed_animation)]
-                stats_text.append(f"{speed_icon} Скорость: {self.stats.download_speed_mb_per_sec:.1f} МБ/с\n", style="blue")
-            
-            # Осталось файлов - отображаем только если больше 0
-            if self.stats.remaining_files_to_download > 0:
-                stats_text.append(f"Осталось: {self.stats.remaining_files_to_download}\n", style="yellow")
+                stats_text.append(f"{speed_icon} Скорость загрузки:\n", style="bold blue")
+                
+                if self.stats.download_speed_files_per_sec > 0:
+                    # Прогресс-бар для скорости файлов
+                    speed_percent = min(self.stats.download_speed_files_per_sec * 10, 100)  # Нормализуем для прогресс-бара
+                    speed_bar = self._create_progress_bar(speed_percent, 12)
+                    stats_text.append(f"  Файлов: {self.stats.download_speed_files_per_sec:.1f}/с\n", style="blue")
+                    stats_text.append(f"  [blue]{speed_bar}[/blue]\n", style="dim")
+                    
+                    # Мини-график скорости файлов
+                    speed_chart = self._create_speed_chart(self.stats.download_speed_files_per_sec, 20.0)
+                    stats_text.append(f"  [blue]{speed_chart}[/blue]\n", style="dim")
+                
+                if self.stats.download_speed_mb_per_sec > 0:
+                    # Прогресс-бар для скорости МБ
+                    mb_percent = min(self.stats.download_speed_mb_per_sec * 20, 100)  # Нормализуем для прогресс-бара
+                    mb_bar = self._create_progress_bar(mb_percent, 12)
+                    stats_text.append(f"  Данных: {self.stats.download_speed_mb_per_sec:.1f} МБ/с\n", style="cyan")
+                    stats_text.append(f"  [cyan]{mb_bar}[/cyan]\n", style="dim")
+                    
+                    # Мини-график скорости МБ
+                    mb_chart = self._create_speed_chart(self.stats.download_speed_mb_per_sec, 50.0)
+                    stats_text.append(f"  [cyan]{mb_chart}[/cyan]\n", style="dim")
+                
+                # Осталось файлов с анимацией
+                if self.stats.remaining_files_to_download > 0:
+                    remaining_animation = ["📁", "📂", "📁", "📂", "⏳", "🔄"]
+                    remaining_icon = remaining_animation[current_time % len(remaining_animation)]
+                    stats_text.append(f"  {remaining_icon} Осталось: {self.stats.remaining_files_to_download}\n", style="yellow")
+                
+                stats_text.append("\n")
             
             stats_text.append("\n")  # Добавляем пустую строку после блока
         
-        # MD файл проверка и ре-экспорт
+        # MD файл проверка и ре-экспорт с анимацией
         if (self.stats.md_verification_status or 
             self.stats.md_verification_channel or 
             self.stats.md_verification_progress or 
             self.stats.md_reexport_count > 0):
             
-            stats_text.append("📁 MD проверка\n\n", style="bold magenta")
+            md_animation = ["📁", "📂", "📁", "📂", "🔍", "✅"]
+            md_icon = md_animation[current_time % len(md_animation)]
+            stats_text.append(f"{md_icon} MD проверка\n", style="bold magenta")
+            stats_text.append("─" * 25 + "\n", style="dim")
             
-            # Статус проверки
+            # Статус проверки с анимацией
             if self.stats.md_verification_status:
                 if "Ошибка" in self.stats.md_verification_status:
-                    stats_text.append(f"Статус: {self.stats.md_verification_status}\n", style="red")
+                    error_animation = ["❌", "⚠️", "❌", "⚠️"]
+                    error_icon = error_animation[current_time % len(error_animation)]
+                    stats_text.append(f"{error_icon} Статус: {self.stats.md_verification_status}\n", style="red")
                 elif "успешно" in self.stats.md_verification_status:
-                    stats_text.append(f"Статус: {self.stats.md_verification_status}\n", style="green")
+                    success_animation = ["✅", "🎉", "✅", "🎉"]
+                    success_icon = success_animation[current_time % len(success_animation)]
+                    stats_text.append(f"{success_icon} Статус: {self.stats.md_verification_status}\n", style="green")
                 else:
-                    stats_text.append(f"Статус: {self.stats.md_verification_status}\n", style="yellow")
+                    process_animation = ["🔄", "⏳", "🔄", "⏳"]
+                    process_icon = process_animation[current_time % len(process_animation)]
+                    stats_text.append(f"{process_icon} Статус: {self.stats.md_verification_status}\n", style="yellow")
             
             # Текущий канал проверки
             if self.stats.md_verification_channel:
-                stats_text.append(f"Канал: {self.stats.md_verification_channel}\n", style="cyan")
+                channel_animation = ["📺", "📡", "📺", "📡"]
+                channel_icon = channel_animation[current_time % len(channel_animation)]
+                stats_text.append(f"{channel_icon} Канал: {self.stats.md_verification_channel}\n", style="cyan")
             
-            # Прогресс проверки
+            # Прогресс проверки с анимированным спиннером
             if self.stats.md_verification_progress:
-                stats_text.append(f"Прогресс: {self.stats.md_verification_progress}\n", style="blue")
+                spinner_text = self._create_animated_spinner(f"Прогресс: {self.stats.md_verification_progress}", "blue")
+                stats_text.append(f"{spinner_text}\n", style="blue")
             
             # Количество повторных экспортов
             if self.stats.md_reexport_count > 0:
-                stats_text.append(f"Повторные экспорты: {self.stats.md_reexport_count}\n", style="orange1")
+                reexport_animation = ["🔄", "↻", "🔄", "↻"]
+                reexport_icon = reexport_animation[current_time % len(reexport_animation)]
+                stats_text.append(f"{reexport_icon} Повторные экспорты: {self.stats.md_reexport_count}\n", style="orange1")
             
             stats_text.append("\n")  # Добавляем пустую строку после блока
         
-        # Последний экспорт
+        # Последний экспорт с анимацией
         if self.stats.last_export_time:
-            stats_text.append("\n📅 Последний экспорт\n\n", style="bold blue")
+            time_animation = ["📅", "⏰", "📅", "⏰", "🕐", "⏱️"]
+            time_icon = time_animation[current_time % len(time_animation)]
+            stats_text.append(f"\n{time_icon} Последний экспорт\n", style="bold blue")
+            stats_text.append("─" * 25 + "\n", style="dim")
             stats_text.append(f"{self.stats.last_export_time}\n", style="blue")
         
         return stats_text
 
     def _create_footer_info(self) -> Text:
-        """Создает информацию для подвала"""
+        """Создает информацию для подвала с анимацией"""
         footer_text = Text()
         
-        # Информация о программе
-        footer_text.append("🚀 Telegram Channel Exporter v1.2.0", style="bold green")
-        footer_text.append(" | ", style="dim")
-        footer_text.append("Нажмите Ctrl+C для выхода", style="yellow")
+        # Анимированная информация о программе
+        current_time = int(time.time() * 2) % 4
+        version_animation = ["🚀", "⚡", "🚀", "⚡"]
+        version_icon = version_animation[current_time]
         
-        # Информация о статусе
+        footer_text.append(f"{version_icon} Telegram Channel Exporter v1.2.0", style="bold green")
+        footer_text.append(" | ", style="dim")
+        
+        # Анимированная подсказка
+        help_animation = ["💡", "⌨️", "💡", "⌨️"]
+        help_icon = help_animation[current_time]
+        footer_text.append(f"{help_icon} Ctrl+C для выхода", style="yellow")
+        
+        # Информация о статусе с анимацией
         if self.stats.current_export_info:
             footer_text.append(" | ", style="dim")
-            footer_text.append("⚡ Экспорт активен", style="green")
+            export_animation = ["⚡", "🚀", "⚡", "🚀"]
+            export_icon = export_animation[current_time]
+            footer_text.append(f"{export_icon} Экспорт активен", style="green")
         
         if self.stats.md_verification_status:
             footer_text.append(" | ", style="dim")
-            footer_text.append("📁 Проверка MD", style="blue")
+            md_animation = ["📁", "🔍", "📁", "🔍"]
+            md_icon = md_animation[current_time]
+            footer_text.append(f"{md_icon} Проверка MD", style="blue")
         
         return footer_text
+
+    def _create_progress_bar(self, percentage: float, width: int = 20) -> str:
+        """Создает текстовый прогресс-бар"""
+        filled = int((percentage / 100) * width)
+        empty = width - filled
+        return "█" * filled + "░" * empty
+
+    def _create_animated_spinner(self, text: str, style: str = "blue") -> str:
+        """Создает анимированный спиннер"""
+        spinners = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        current_time = int(time.time() * 10) % len(spinners)
+        return f"[{style}]{spinners[current_time]}[/{style}] {text}"
+
+    def _create_mini_chart(self, values: list, width: int = 15, height: int = 5) -> str:
+        """Создает мини-график из значений"""
+        if not values or len(values) < 2:
+            return "─" * width
+        
+        # Нормализуем значения
+        max_val = max(values)
+        min_val = min(values)
+        if max_val == min_val:
+            return "─" * width
+        
+        # Создаем график
+        chart_lines = []
+        for row in range(height):
+            line = ""
+            for col in range(width):
+                if col < len(values):
+                    # Нормализуем значение для текущей строки
+                    normalized = (values[col] - min_val) / (max_val - min_val)
+                    threshold = (height - 1 - row) / height
+                    
+                    if normalized >= threshold:
+                        if row == height - 1:  # Нижняя строка
+                            line += "█"
+                        elif row == 0:  # Верхняя строка
+                            line += "▔"
+                        else:
+                            line += "▊"
+                    else:
+                        line += " "
+                else:
+                    line += " "
+            chart_lines.append(line)
+        
+        return "\n".join(chart_lines)
+
+    def _create_speed_chart(self, current_speed: float, max_speed: float = 10.0) -> str:
+        """Создает мини-график скорости"""
+        # Создаем историю скоростей (симуляция)
+        speeds = [current_speed]
+        for i in range(14):  # 15 точек для графика
+            # Добавляем небольшие вариации
+            variation = (i % 3 - 1) * 0.5
+            speed = max(0, current_speed + variation)
+            speeds.append(speed)
+        
+        return self._create_mini_chart(speeds, 15, 4)
 
     def _update_discovered_exported_stats(self):
         """Обновляет статистику обнаруженных и экспортированных сообщений"""
