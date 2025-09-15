@@ -5,11 +5,12 @@
 1. [Основные классы](#основные-классы)
 2. [Методы TelegramExporter](#методы-telegramexporter)
 3. [Методы ConfigManager](#методы-configmanager)
-4. [Модули экспорта](#модули-экспорта)
-5. [Фильтрация контента](#фильтрация-контента)
-6. [Уведомления](#уведомления)
-7. [Структуры данных](#структуры-данных)
-8. [Константы](#константы)
+4. [Система тем](#система-тем)
+5. [Модули экспорта](#модули-экспорта)
+6. [Фильтрация контента](#фильтрация-контента)
+7. [Уведомления](#уведомления)
+8. [Структуры данных](#структуры-данных)
+9. [Константы](#константы)
 
 ---
 
@@ -581,6 +582,156 @@ def show_filter_config(self):
     """Отображение конфигурации фильтрации"""
 ```
 
+#### `configure_theme(self)`
+Настройка темы оформления.
+```python
+def configure_theme(self):
+    """Настройка темы оформления"""
+```
+
+#### `set_theme(self, theme_id: str) -> bool`
+Установка темы оформления.
+```python
+def set_theme(self, theme_id: str) -> bool:
+    """
+    Установка темы оформления
+    
+    Args:
+        theme_id (str): ID темы
+        
+    Returns:
+        bool: True если тема установлена успешно
+    """
+```
+
+---
+
+## 🌈 Система тем
+
+### `ThemeManager`
+
+Менеджер тем оформления.
+
+```python
+class ThemeManager:
+    """Менеджер тем оформления"""
+    
+    def __init__(self):
+        """Инициализация менеджера тем"""
+```
+
+#### `get_available_themes(self) -> Dict[str, str]`
+Получение списка доступных тем.
+```python
+def get_available_themes(self) -> Dict[str, str]:
+    """
+    Получение списка доступных тем
+    
+    Returns:
+        Dict[str, str]: Словарь {theme_id: theme_name}
+    """
+```
+
+#### `get_theme(self, theme_type: ThemeType) -> ThemeColors`
+Получение цветовой схемы темы.
+```python
+def get_theme(self, theme_type: ThemeType) -> ThemeColors:
+    """
+    Получение цветовой схемы темы
+    
+    Args:
+        theme_type (ThemeType): Тип темы
+        
+    Returns:
+        ThemeColors: Цветовая схема темы
+    """
+```
+
+#### `set_theme(self, theme_type: ThemeType)`
+Установка активной темы.
+```python
+def set_theme(self, theme_type: ThemeType):
+    """
+    Установка активной темы
+    
+    Args:
+        theme_type (ThemeType): Тип темы
+    """
+```
+
+### `ThemeType`
+
+Перечисление типов тем.
+
+```python
+class ThemeType(Enum):
+    """Типы доступных тем"""
+    SOLARIZED_DARK = "solarized_dark"
+    SOLARIZED_LIGHT = "solarized_light"
+    KANAGAWA = "kanagawa"
+    DARCULA = "darcula"
+    MONOKAI = "monokai"
+    GRUVBOX = "gruvbox"
+    NORD = "nord"
+    TOKYO_NIGHT = "tokyo_night"
+    CATPPUCCIN = "catppuccin"
+    DEFAULT = "default"
+```
+
+### `ThemeColors`
+
+Структура цветовой схемы темы.
+
+```python
+@dataclass
+class ThemeColors:
+    """Цветовая схема темы"""
+    # Основные цвета
+    primary: str          # Основной цвет
+    secondary: str        # Вторичный цвет
+    accent: str           # Акцентный цвет
+    background: str       # Цвет фона
+    surface: str          # Цвет поверхностей
+    
+    # Текст
+    text_primary: str     # Основной текст
+    text_secondary: str   # Вторичный текст
+    text_muted: str       # Приглушенный текст
+    
+    # Статусы
+    success: str          # Успех
+    warning: str          # Предупреждение
+    error: str            # Ошибка
+    info: str             # Информация
+    
+    # Элементы интерфейса
+    border: str           # Границы
+    border_bright: str    # Яркие границы
+    panel_bg: str         # Фон панелей
+    
+    # Анимации
+    animation_primary: str    # Основная анимация
+    animation_secondary: str  # Вторичная анимация
+    
+    # Специальные
+    progress_bar: str     # Прогресс-бары
+    progress_bg: str      # Фон прогресс-баров
+    table_header: str     # Заголовки таблиц
+    table_row: str        # Строки таблиц
+```
+
+### `ThemeConfig`
+
+Конфигурация темы.
+
+```python
+@dataclass
+class ThemeConfig:
+    """Конфигурация темы оформления"""
+    theme: str = "default"    # Текущая тема
+    auto_apply: bool = True   # Автоматически применять тему при запуске
+```
+
 ---
 
 ## 📤 Модули экспорта
@@ -1052,7 +1203,39 @@ is_filtered = content_filter.should_filter(text)
 print(f"Сообщение отфильтровано: {is_filtered}")
 ```
 
-### Пример 5: Отправка уведомлений
+### Пример 5: Работа с темами оформления
+
+```python
+from themes import ThemeManager, ThemeType, ThemeColors
+from config_manager import ConfigManager, ThemeConfig
+
+# Создание менеджера тем
+theme_manager = ThemeManager()
+
+# Получение списка доступных тем
+available_themes = theme_manager.get_available_themes()
+print("Доступные темы:")
+for theme_id, theme_name in available_themes.items():
+    print(f"  {theme_id}: {theme_name}")
+
+# Установка темы
+theme_manager.set_theme(ThemeType.SOLARIZED_DARK)
+
+# Получение цветовой схемы темы
+colors = theme_manager.get_theme(ThemeType.SOLARIZED_DARK)
+print(f"Основной цвет: {colors.primary}")
+print(f"Цвет фона: {colors.background}")
+
+# Настройка темы через конфигурацию
+config_manager = ConfigManager()
+config_manager.config.theme = ThemeConfig(
+    theme="solarized_dark",
+    auto_apply=True
+)
+config_manager.save_config()
+```
+
+### Пример 6: Отправка уведомлений
 
 ```python
 import asyncio
