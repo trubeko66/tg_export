@@ -1086,7 +1086,7 @@ class TelegramExporter:
                 info_text += f" | [green]Текущий: #{current_channel_index + 1}[/green]"
             
             # Добавляем навигационные подсказки
-            nav_text = f"[dim]📊 Прокрутка: {scroll_bar} {scroll_percent:.0f}%[/dim]"
+            nav_text = f"📊 Прокрутка: {scroll_bar} {scroll_percent:.0f}%"
             
             channels_table.add_row(
                 info_text,
@@ -1148,7 +1148,7 @@ class TelegramExporter:
             progress_bar = self._create_progress_bar(progress_percent, 20)
             stats_text.append(f"Каналов: {self.stats.total_channels} ", style="green")
             stats_text.append(f"({active_channels} активных)\n", style="dim")
-            stats_text.append(f"[green]{progress_bar}[/green] {progress_percent:.1f}%\n\n", style="dim")
+            stats_text.append(f"{progress_bar} {progress_percent:.1f}%\n\n", style="green")
         
         # Отображаем обнаруженные и экспортированные сообщения с прогресс-баром
         if self.stats.discovered_messages > 0:
@@ -1157,7 +1157,7 @@ class TelegramExporter:
             
             stats_text.append(f"Обнаружено: {self.stats.discovered_messages}\n", style="cyan")
             stats_text.append(f"Экспортировано: {self.stats.exported_messages}\n", style="yellow")
-            stats_text.append(f"[yellow]{progress_bar}[/yellow] {progress_percent:.1f}%\n\n", style="dim")
+            stats_text.append(f"{progress_bar} {progress_percent:.1f}%\n\n", style="yellow")
         else:
             stats_text.append(f"Сообщений: {self.stats.total_messages}\n", style="yellow")
         
@@ -1232,12 +1232,12 @@ class TelegramExporter:
                         progress_animation = ["⏳", "🔄", "⏳", "🔄", "⚡", "💨"]
                         progress_icon = progress_animation[current_time % len(progress_animation)]
                         stats_text.append(f"  {progress_icon} Осталось: {remaining}\n", style="magenta")
-                        stats_text.append(f"  [cyan]{progress_bar}[/cyan] {progress_percent:.1f}%\n", style="dim")
+                        stats_text.append(f"  {progress_bar} {progress_percent:.1f}%\n", style="cyan")
                     else:
                         complete_animation = ["✅", "🎉", "✅", "🎉", "🏆", "⭐"]
                         complete_icon = complete_animation[current_time % len(complete_animation)]
                         stats_text.append(f"  {complete_icon} Все обработано!\n", style="green")
-                        stats_text.append(f"  [green]{progress_bar}[/green] 100.0%\n", style="dim")
+                        stats_text.append(f"  {progress_bar} 100.0%\n", style="green")
                 
                 stats_text.append("\n")
             
@@ -1256,22 +1256,22 @@ class TelegramExporter:
                     speed_percent = min(self.stats.download_speed_files_per_sec * 10, 100)  # Нормализуем для прогресс-бара
                     speed_bar = self._create_progress_bar(speed_percent, 12)
                     stats_text.append(f"  Файлов: {self.stats.download_speed_files_per_sec:.1f}/с\n", style="blue")
-                    stats_text.append(f"  [blue]{speed_bar}[/blue]\n", style="dim")
+                    stats_text.append(f"  {speed_bar}\n", style="blue")
                     
                     # Мини-график скорости файлов
                     speed_chart = self._create_speed_chart(self.stats.download_speed_files_per_sec, 20.0)
-                    stats_text.append(f"  [blue]{speed_chart}[/blue]\n", style="dim")
+                    stats_text.append(f"  {speed_chart}\n", style="blue")
                 
                 if self.stats.download_speed_mb_per_sec > 0:
                     # Прогресс-бар для скорости МБ
                     mb_percent = min(self.stats.download_speed_mb_per_sec * 20, 100)  # Нормализуем для прогресс-бара
                     mb_bar = self._create_progress_bar(mb_percent, 12)
                     stats_text.append(f"  Данных: {self.stats.download_speed_mb_per_sec:.1f} МБ/с\n", style="cyan")
-                    stats_text.append(f"  [cyan]{mb_bar}[/cyan]\n", style="dim")
+                    stats_text.append(f"  {mb_bar}\n", style="cyan")
                     
                     # Мини-график скорости МБ
                     mb_chart = self._create_speed_chart(self.stats.download_speed_mb_per_sec, 50.0)
-                    stats_text.append(f"  [cyan]{mb_chart}[/cyan]\n", style="dim")
+                    stats_text.append(f"  {mb_chart}\n", style="cyan")
                 
                 # Осталось файлов с анимацией
                 if self.stats.remaining_files_to_download > 0:
@@ -2056,15 +2056,25 @@ class TelegramExporter:
             total_new_messages = 0
             
             # Проверяем каждый канал на наличие новых сообщений
-            for channel in self.channels:
+            self.logger.info(f"Начинаем проверку {len(self.channels)} каналов на наличие новых сообщений")
+            
+            for i, channel in enumerate(self.channels, 1):
                 try:
+                    self.logger.info(f"Проверка канала {i}/{len(self.channels)}: {channel.title} (последний ID: {channel.last_message_id})")
+                    
+                    # Выполняем диагностику канала для отладки
+                    diagnosis = await self._diagnose_channel_issues(channel)
+                    self.logger.info(f"Диагностика канала {channel.title}: {diagnosis['issues']}")
+                    
                     new_count = await self._check_and_append_new_messages(channel)
                     if new_count > 0:
                         new_messages_summary[channel.title] = new_count
                         total_new_messages += new_count
-                        self.logger.info(f"Найдено {new_count} новых сообщений в канале {channel.title}")
+                        self.logger.info(f"✅ Найдено {new_count} новых сообщений в канале {channel.title}")
+                    else:
+                        self.logger.info(f"ℹ️ Новых сообщений не найдено в канале {channel.title}")
                 except Exception as e:
-                    self.logger.error(f"Ошибка проверки канала {channel.title}: {e}")
+                    self.logger.error(f"❌ Ошибка проверки канала {channel.title}: {e}")
                     continue
             
             # Отправляем сводное уведомление
@@ -2079,6 +2089,45 @@ class TelegramExporter:
         except Exception as e:
             self.logger.error(f"Ошибка ежедневной проверки: {e}")
             await self.send_notification(f"❌ Ошибка ежедневной проверки: {str(e)}")
+
+    async def _diagnose_channel_issues(self, channel: ChannelInfo) -> Dict[str, any]:
+        """Диагностика проблем с каналом для отладки"""
+        diagnosis = {
+            "channel_title": channel.title,
+            "channel_id": channel.id,
+            "last_message_id": channel.last_message_id,
+            "total_messages": channel.total_messages,
+            "last_check": channel.last_check,
+            "issues": []
+        }
+        
+        try:
+            # Проверяем доступность канала
+            entity = await self.client.get_entity(channel.id)
+            diagnosis["entity_accessible"] = True
+            
+            # Получаем последнее сообщение
+            last_message = await self.client.get_messages(entity, limit=1)
+            if last_message and len(last_message) > 0:
+                actual_last_id = last_message[0].id
+                diagnosis["actual_last_message_id"] = actual_last_id
+                
+                if channel.last_message_id == 0:
+                    diagnosis["issues"].append("last_message_id равен 0 - канал не был экспортирован")
+                elif channel.last_message_id > actual_last_id:
+                    diagnosis["issues"].append(f"last_message_id ({channel.last_message_id}) больше актуального ({actual_last_id})")
+                elif channel.last_message_id == actual_last_id:
+                    diagnosis["issues"].append("Нет новых сообщений")
+                else:
+                    diagnosis["issues"].append("Есть новые сообщения для экспорта")
+            else:
+                diagnosis["issues"].append("Не удалось получить последнее сообщение")
+                
+        except Exception as e:
+            diagnosis["entity_accessible"] = False
+            diagnosis["issues"].append(f"Ошибка доступа к каналу: {e}")
+        
+        return diagnosis
 
     async def _check_and_append_new_messages(self, channel: ChannelInfo) -> int:
         """Проверка и добавление новых сообщений в существующий MD файл"""
@@ -2113,18 +2162,61 @@ class TelegramExporter:
             
             self.logger.info(f"Поиск сообщений в канале {channel.title} после ID {min_id}")
             
+            # Дополнительная отладочная информация
+            if min_id == 0:
+                self.logger.warning(f"Канал {channel.title} имеет last_message_id = 0, это может означать, что канал не был экспортирован ранее")
+                # Если last_message_id = 0, получаем последнее сообщение для установки правильного ID
+                try:
+                    last_message = await self.client.get_messages(entity, limit=1)
+                    if last_message and len(last_message) > 0:
+                        actual_last_id = last_message[0].id
+                        self.logger.info(f"Канал {channel.title}: последнее сообщение в канале имеет ID {actual_last_id}")
+                        # Обновляем last_message_id на актуальный
+                        channel.last_message_id = actual_last_id
+                        min_id = actual_last_id
+                        self.save_channels()
+                        self.logger.info(f"Обновлен last_message_id для канала {channel.title} на {actual_last_id}")
+                except Exception as e:
+                    self.logger.error(f"Ошибка получения последнего сообщения для канала {channel.title}: {e}")
+            else:
+                self.logger.info(f"Канал {channel.title}: последний обработанный ID = {min_id}")
+                
+                # Проверяем, не устарел ли last_message_id
+                try:
+                    # Получаем последнее сообщение для проверки актуальности
+                    last_message = await self.client.get_messages(entity, limit=1)
+                    if last_message and len(last_message) > 0:
+                        actual_last_id = last_message[0].id
+                        if actual_last_id < min_id:
+                            self.logger.warning(f"Канал {channel.title}: last_message_id ({min_id}) больше актуального ID ({actual_last_id}). Возможно, канал был очищен.")
+                            # Обновляем на актуальный ID
+                            channel.last_message_id = actual_last_id
+                            min_id = actual_last_id
+                            self.save_channels()
+                        elif actual_last_id == min_id:
+                            self.logger.info(f"Канал {channel.title}: нет новых сообщений (последний ID = {actual_last_id})")
+                except Exception as e:
+                    self.logger.error(f"Ошибка проверки актуальности last_message_id для канала {channel.title}: {e}")
+            
             # Получаем только новые сообщения
             try:
-                # Используем offset_id для получения сообщений после определенного ID
-                messages = await self.client.get_messages(entity, offset_id=min_id, limit=100)
-                # Фильтруем только действительно новые сообщения
+                # Получаем последние сообщения и фильтруем только новые
+                # offset_id в Telethon работает как "пропустить сообщения до этого ID"
+                # Поэтому мы получаем последние сообщения и фильтруем их
+                messages = await self.client.get_messages(entity, limit=100)
+                
+                # Фильтруем только действительно новые сообщения (ID больше последнего обработанного)
                 messages = [msg for msg in messages if msg.id > min_id]
+                
+                self.logger.info(f"Получено {len(messages)} новых сообщений для канала {channel.title} (после ID {min_id})")
+                
             except Exception as e:
-                self.logger.warning(f"Failed to get messages with offset_id for {channel.title}: {e}")
+                self.logger.warning(f"Failed to get messages for {channel.title}: {e}")
                 # Альтернативный метод: получаем последние сообщения
                 messages = await self.client.get_messages(entity, limit=50)
                 # Фильтруем только новые сообщения
                 messages = [msg for msg in messages if msg.id > min_id]
+                self.logger.info(f"Альтернативный метод: получено {len(messages)} новых сообщений для канала {channel.title}")
             
             # Обрабатываем полученные сообщения
             for message in messages:
