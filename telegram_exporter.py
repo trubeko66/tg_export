@@ -48,6 +48,7 @@ from exporters import (
     MessageData, JSONExporter, HTMLExporter, MarkdownExporter, MediaDownloader, BaseExporter
 )
 from config_manager import ConfigManager
+from themes import ThemeManager, ThemeType
 
 
 class ExportType(Enum):
@@ -122,6 +123,11 @@ class TelegramExporter:
         
         # Инициализация менеджера конфигурации
         self.config_manager = ConfigManager()
+        
+        # Инициализация системы тем
+        self.theme_manager = ThemeManager()
+        self._apply_theme()
+        
         # Путь списка каналов из конфигурации
         try:
             storage_cfg = self.config_manager.config.storage  # type: ignore[attr-defined]
@@ -904,20 +910,22 @@ class TelegramExporter:
         title_animation = ["🚀", "⚡", "🚀", "⚡"]
         title_icon = title_animation[current_time]
         
-        header_text = Text(f"{title_icon} Telegram Channel Exporter", style="bold magenta")
+        # Используем цвета из темы
+        colors = self.current_theme_colors
+        header_text = Text(f"{title_icon} Telegram Channel Exporter", style=f"bold {colors.accent}")
         header_text.append(" | Статус: ", style="bold")
         
         # Анимированный статус
         status_animation = ["🟢", "🟡", "🟢", "🟡"]
         status_icon = status_animation[current_time]
-        header_text.append(f"{status_icon} Работает", style="bold green")
+        header_text.append(f"{status_icon} Работает", style=f"bold {colors.success}")
         
         if self.stats.current_export_info:
             export_animation = ["⚡", "🚀", "⚡", "🚀"]
             export_icon = export_animation[current_time]
-            header_text.append(f" | {export_icon} {self.stats.current_export_info}", style="yellow")
+            header_text.append(f" | {export_icon} {self.stats.current_export_info}", style=colors.warning)
         
-        layout["header"].update(Panel(header_text, box=box.DOUBLE, border_style="bright_magenta"))
+        layout["header"].update(Panel(header_text, box=box.DOUBLE, border_style=colors.border_bright))
         
         # Главная область - разделена на левую и правую панели (7:3) для 70% каналов и 30% статистики
         layout["main"].split_row(
@@ -932,7 +940,7 @@ class TelegramExporter:
             title="📺 Мониторинг каналов", 
             box=box.ROUNDED, 
             expand=True,
-            border_style="bright_blue",
+            border_style=colors.primary,
             title_align="left"
         ))
         
@@ -942,7 +950,7 @@ class TelegramExporter:
             stats_content, 
             title="📊 Статистика", 
             box=box.ROUNDED,
-            border_style="bright_cyan",
+            border_style=colors.secondary,
             title_align="left"
         ))
         
@@ -951,27 +959,28 @@ class TelegramExporter:
         layout["footer"].update(Panel(
             footer_content, 
             box=box.ROUNDED,
-            border_style="bright_green"
+            border_style=colors.success
         ))
         
         return layout
 
     def _create_detailed_channels_table(self) -> Table:
         """Создает оптимизированную таблицу каналов для левой панели с улучшенным дизайном"""
+        colors = self.current_theme_colors
         channels_table = Table(
             box=box.ROUNDED, 
             show_header=True, 
-            header_style="bold white", 
+            header_style=colors.table_header, 
             expand=True,
             min_width=90,  # Увеличиваем минимальную ширину
             collapse_padding=False,  # Убираем сжатие отступов для лучшего вида
-            border_style="bright_blue"  # Добавляем цветную границу
+            border_style=colors.primary  # Добавляем цветную границу
         )
-        channels_table.add_column("📺 Канал", style="green", no_wrap=False, ratio=5)
-        channels_table.add_column("🕐 Проверка", style="blue", no_wrap=True, ratio=2)
-        channels_table.add_column("📊 Сообщений", style="yellow", justify="right", no_wrap=True, ratio=1)
-        channels_table.add_column("💾 Размер", style="magenta", justify="right", no_wrap=True, ratio=1)
-        channels_table.add_column("⚡ Статус", style="cyan", justify="center", no_wrap=True, ratio=1)
+        channels_table.add_column("📺 Канал", style=colors.success, no_wrap=False, ratio=5)
+        channels_table.add_column("🕐 Проверка", style=colors.primary, no_wrap=True, ratio=2)
+        channels_table.add_column("📊 Сообщений", style=colors.warning, justify="right", no_wrap=True, ratio=1)
+        channels_table.add_column("💾 Размер", style=colors.accent, justify="right", no_wrap=True, ratio=1)
+        channels_table.add_column("⚡ Статус", style=colors.secondary, justify="center", no_wrap=True, ratio=1)
         
         if not self.channels:
             channels_table.add_row(
@@ -1031,12 +1040,12 @@ class TelegramExporter:
                 export_animation = ["⚡", "🚀", "⚡", "🚀", "💫", "🌟"]
                 current_time = int(time.time() * 3) % len(export_animation)
                 export_icon = export_animation[current_time]
-                status = f"[green]{export_icon} Экспорт[/green]"
-                channel_name = f"[bold green]▶ {channel_name}[/bold green]"
+                status = f"[{colors.success}]{export_icon} Экспорт[/{colors.success}]"
+                channel_name = f"[bold {colors.success}]▶ {channel_name}[/bold {colors.success}]"
             elif channel.last_check:
-                status = "[blue]✓ Готов[/blue]"
+                status = f"[{colors.primary}]✓ Готов[/{colors.primary}]"
             else:
-                status = "[dim]⏳ Ожид.[/dim]"
+                status = f"[{colors.text_muted}]⏳ Ожид.[/{colors.text_muted}]"
             
             # Компактное форматирование даты
             if last_check != "Никогда":
@@ -1109,8 +1118,9 @@ class TelegramExporter:
         animation = animation_chars[current_time]
         
         # Основная статистика с анимацией
-        stats_text.append(f"{animation} Общая статистика\n", style="bold cyan")
-        stats_text.append("─" * 25 + "\n", style="dim")
+        colors = self.current_theme_colors
+        stats_text.append(f"{animation} Общая статистика\n", style=f"bold {colors.secondary}")
+        stats_text.append("─" * 25 + "\n", style=colors.text_muted)
         
         # Добавляем интерактивные элементы и индикаторы состояния
         stats_text.append("💡 Подсказки:\n", style="bold yellow")
@@ -1341,32 +1351,33 @@ class TelegramExporter:
     def _create_footer_info(self) -> Text:
         """Создает информацию для подвала с анимацией"""
         footer_text = Text()
+        colors = self.current_theme_colors
         
         # Анимированная информация о программе
         current_time = int(time.time() * 2) % 4
         version_animation = ["🚀", "⚡", "🚀", "⚡"]
         version_icon = version_animation[current_time]
         
-        footer_text.append(f"{version_icon} Telegram Channel Exporter v1.2.0", style="bold green")
-        footer_text.append(" | ", style="dim")
+        footer_text.append(f"{version_icon} Telegram Channel Exporter v1.2.0", style=f"bold {colors.success}")
+        footer_text.append(" | ", style=colors.text_muted)
         
         # Анимированная подсказка
         help_animation = ["💡", "⌨️", "💡", "⌨️"]
         help_icon = help_animation[current_time]
-        footer_text.append(f"{help_icon} Ctrl+C для выхода", style="yellow")
+        footer_text.append(f"{help_icon} Ctrl+C для выхода", style=colors.warning)
         
         # Информация о статусе с анимацией
         if self.stats.current_export_info:
-            footer_text.append(" | ", style="dim")
+            footer_text.append(" | ", style=colors.text_muted)
             export_animation = ["⚡", "🚀", "⚡", "🚀"]
             export_icon = export_animation[current_time]
-            footer_text.append(f"{export_icon} Экспорт активен", style="green")
+            footer_text.append(f"{export_icon} Экспорт активен", style=colors.success)
         
         if self.stats.md_verification_status:
-            footer_text.append(" | ", style="dim")
+            footer_text.append(" | ", style=colors.text_muted)
             md_animation = ["📁", "🔍", "📁", "🔍"]
             md_icon = md_animation[current_time]
-            footer_text.append(f"{md_icon} Проверка MD", style="blue")
+            footer_text.append(f"{md_icon} Проверка MD", style=colors.primary)
         
         return footer_text
 
@@ -1417,6 +1428,18 @@ class TelegramExporter:
             chart_lines.append(line)
         
         return "\n".join(chart_lines)
+
+    def _apply_theme(self):
+        """Применить текущую тему оформления"""
+        try:
+            theme_id = self.config_manager.config.theme.theme
+            theme_type = ThemeType(theme_id)
+            self.theme_manager.set_theme(theme_type)
+            self.current_theme_colors = self.theme_manager.get_theme(theme_type)
+        except (ValueError, AttributeError):
+            # Если тема не найдена или не настроена, используем стандартную
+            self.theme_manager.set_theme(ThemeType.DEFAULT)
+            self.current_theme_colors = self.theme_manager.get_theme(ThemeType.DEFAULT)
 
     def _create_speed_chart(self, current_speed: float, max_speed: float = 10.0) -> str:
         """Создает мини-график скорости"""

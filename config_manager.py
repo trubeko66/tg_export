@@ -46,6 +46,13 @@ class StorageConfig:
 
 
 @dataclass
+class ThemeConfig:
+    """Конфигурация темы оформления"""
+    theme: str = "default"  # Текущая тема
+    auto_apply: bool = True  # Автоматически применять тему при запуске
+
+
+@dataclass
 class WebDavConfig:
     """Конфигурация WebDAV синхронизации"""
     enabled: bool = False
@@ -67,6 +74,7 @@ class AppConfig:
     first_run: bool = True
     storage: StorageConfig = field(default_factory=StorageConfig)
     webdav: WebDavConfig = field(default_factory=WebDavConfig)
+    theme: ThemeConfig = field(default_factory=ThemeConfig)
 
 
     
@@ -104,12 +112,15 @@ class ConfigManager:
                 
                 storage_cfg = StorageConfig(**data.get('storage', {})) if isinstance(data.get('storage', {}), dict) else StorageConfig()
                 webdav_cfg = WebDavConfig(**data.get('webdav', {})) if isinstance(data.get('webdav', {}), dict) else WebDavConfig()
+                theme_cfg = ThemeConfig(**data.get('theme', {})) if isinstance(data.get('theme', {}), dict) else ThemeConfig()
+                
                 return AppConfig(
                     telegram=telegram_config,
                     bot=bot_config,
                     first_run=data.get('first_run', True),
                     storage=storage_cfg,
-                    webdav=webdav_cfg
+                    webdav=webdav_cfg,
+                    theme=theme_cfg
                 )
             except Exception as e:
                 self.console.print(f"[yellow]Ошибка загрузки конфигурации: {e}[/yellow]")
@@ -121,7 +132,8 @@ class ConfigManager:
             bot=BotConfig(),
             first_run=True,
             storage=StorageConfig(),
-            webdav=WebDavConfig()
+            webdav=WebDavConfig(),
+            theme=ThemeConfig()
         )
     
     def save_config(self):
@@ -132,7 +144,8 @@ class ConfigManager:
                 'bot': asdict(self.config.bot),
                 'first_run': self.config.first_run,
                 'storage': asdict(self.config.storage),
-                'webdav': asdict(self.config.webdav)
+                'webdav': asdict(self.config.webdav),
+                'theme': asdict(self.config.theme)
             }
             
             with open(self.config_file, 'w', encoding='utf-8') as f:
@@ -342,6 +355,16 @@ class ConfigManager:
             table2.add_row("Загрузка архивов", "Включена" if webdav.upload_archives else "Отключена", "—")
             table2.add_row("Каталог архивов", webdav.archives_remote_dir or "—", "—")
         self.console.print(table2)
+        
+        # Добавляем информацию о теме
+        theme = self.config.theme
+        table3 = Table(title="Тема оформления", box=box.ROUNDED)
+        table3.add_column("Параметр", style="cyan")
+        table3.add_column("Значение", style="green")
+        table3.add_column("Статус", style="yellow")
+        table3.add_row("Текущая тема", theme.theme.replace("_", " ").title(), "—")
+        table3.add_row("Автоприменение", "Включено" if theme.auto_apply else "Отключено", "—")
+        self.console.print(table3)
     
     def interactive_setup(self):
         """Интерактивная настройка конфигурации"""
@@ -359,12 +382,13 @@ class ConfigManager:
             self.console.print("2. Настроить бота для уведомлений")
             self.console.print("3. Настроить путь хранения списка каналов")
             self.console.print("4. Настроить WebDAV синхронизацию")
-            self.console.print("5. Показать текущую конфигурацию")
-            self.console.print("6. Сбросить конфигурацию")
-            self.console.print("7. Продолжить с текущими настройками")
+            self.console.print("5. Настроить тему оформления")
+            self.console.print("6. Показать текущую конфигурацию")
+            self.console.print("7. Сбросить конфигурацию")
+            self.console.print("8. Продолжить с текущими настройками")
             self.console.print("0. Выход")
             
-            choice = Prompt.ask("\nВыберите действие", choices=["0", "1", "2", "3", "4", "5", "6", "7"])
+            choice = Prompt.ask("\nВыберите действие", choices=["0", "1", "2", "3", "4", "5", "6", "7", "8"])
             
             if choice == "1":
                 self.setup_telegram_config(force_setup=True)
@@ -375,11 +399,13 @@ class ConfigManager:
             elif choice == "4":
                 self.setup_webdav_config(force_setup=True)
             elif choice == "5":
-                input("\nНажмите Enter для продолжения...")
+                self.configure_theme()
             elif choice == "6":
+                input("\nНажмите Enter для продолжения...")
+            elif choice == "7":
                 if Confirm.ask("Вы уверены, что хотите сбросить всю конфигурацию?"):
                     self.reset_config()
-            elif choice == "7":
+            elif choice == "8":
                 break
             elif choice == "0":
                 return False
@@ -646,3 +672,104 @@ class ConfigManager:
             
         except Exception as e:
             raise Exception(f"Ошибка добавления канала в файл: {e}")
+    
+    def configure_theme(self):
+        """Настройка темы оформления"""
+        from themes import ThemeManager, ThemeType
+        
+        theme_manager = ThemeManager()
+        available_themes = theme_manager.get_available_themes()
+        
+        self.console.clear()
+        self.console.print(Panel.fit(
+            "[bold blue]Настройка темы оформления[/bold blue]",
+            box=box.DOUBLE
+        ))
+        
+        # Показываем текущую тему
+        current_theme = self.config.theme.theme
+        current_theme_name = available_themes.get(current_theme, "Неизвестная")
+        self.console.print(f"\n[bold]Текущая тема:[/bold] {current_theme_name}")
+        
+        # Показываем доступные темы
+        self.console.print("\n[bold cyan]Доступные темы:[/bold cyan]")
+        theme_table = Table(box=box.ROUNDED, show_header=True, header_style="bold white")
+        theme_table.add_column("№", style="cyan", width=3)
+        theme_table.add_column("Название", style="green", width=20)
+        theme_table.add_column("Описание", style="yellow")
+        
+        theme_list = list(available_themes.items())
+        for i, (theme_id, description) in enumerate(theme_list, 1):
+            theme_table.add_row(
+                str(i),
+                theme_id.replace("_", " ").title(),
+                description
+            )
+        
+        self.console.print(theme_table)
+        
+        # Выбор темы
+        while True:
+            try:
+                choice = Prompt.ask(
+                    f"\nВыберите тему (1-{len(theme_list)}) или 'q' для выхода",
+                    default="q"
+                )
+                
+                if choice.lower() == 'q':
+                    break
+                
+                choice_num = int(choice)
+                if 1 <= choice_num <= len(theme_list):
+                    selected_theme_id = theme_list[choice_num - 1][0]
+                    selected_theme_name = theme_list[choice_num - 1][1]
+                    
+                    # Устанавливаем новую тему
+                    self.config.theme.theme = selected_theme_id
+                    self.save_config()
+                    
+                    self.console.print(f"\n[green]✓ Тема изменена на: {selected_theme_name}[/green]")
+                    
+                    # Спрашиваем, применить ли сразу
+                    if Confirm.ask("Применить тему сейчас?"):
+                        self.apply_theme(selected_theme_id)
+                        self.console.print("[green]✓ Тема применена![/green]")
+                    
+                    break
+                else:
+                    self.console.print("[red]Неверный номер темы[/red]")
+            except ValueError:
+                self.console.print("[red]Введите корректный номер[/red]")
+    
+    def apply_theme(self, theme_id: str = None):
+        """Применить тему оформления"""
+        from themes import ThemeManager, ThemeType
+        
+        if theme_id is None:
+            theme_id = self.config.theme.theme
+        
+        theme_manager = ThemeManager()
+        
+        # Преобразуем строку в ThemeType
+        try:
+            theme_type = ThemeType(theme_id)
+            theme_manager.set_theme(theme_type)
+            colors = theme_manager.get_theme(theme_type)
+            
+            # Применяем цвета к консоли
+            self.console.style = colors.background
+            self.console.print(f"[{colors.text_primary}]Тема {theme_manager.get_theme_name(theme_type)} применена[/{colors.text_primary}]")
+            
+        except ValueError:
+            self.console.print(f"[red]Неизвестная тема: {theme_id}[/red]")
+    
+    def get_current_theme_colors(self):
+        """Получить цвета текущей темы"""
+        from themes import ThemeManager, ThemeType
+        
+        theme_manager = ThemeManager()
+        try:
+            theme_type = ThemeType(self.config.theme.theme)
+            return theme_manager.get_theme(theme_type)
+        except ValueError:
+            return theme_manager.get_theme(ThemeType.DEFAULT)
